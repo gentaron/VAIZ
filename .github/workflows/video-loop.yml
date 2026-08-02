@@ -2,7 +2,7 @@ name: VAIZ Video Loop
 
 on:
   schedule:
-    - cron: '0 22 * * *' # 毎日 22:00 UTC
+    - cron: '0 22 * * *' # 毎日 22:00 UTC (マレーシア時間 翌 06:00)
   workflow_dispatch: {} # 手動実行
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: video-loop
-  cancel-in-progress: true
+  cancel-in-progress: false # 実行中のレンダリングを途中で殺さない
 
 jobs:
   video:
@@ -35,6 +35,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      # ── モデルキャッシュ (TTS install より前に置く) ────────
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/kokoro
+          key: kokoro-onnx-${{ runner.os }}-v1
 
       - name: Install TTS dependencies
         run: |
@@ -82,35 +91,44 @@ jobs:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         run: bun run scripts/video/publish.mjs
 
-      # ── Artifact (どのステップで失敗しても out/ を保存) ──
+      # ── Artifact (plan 自体が落ちても out/ を保存) ─────────
       - name: Upload out/ as artifact
-        if: always() && steps.plan.outputs.found == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: video-out-${{ github.run_number }}
           path: out/
+          if-no-files-found: ignore
           retention-days: 7
 
       # ── 失敗時: Linear に通知 ────────────────────────────
       - name: Notify Linear on failure
-        if: failure() && steps.plan.outputs.found == 'true'
+        if: failure()
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          ISSUE_ID=$(jq -r '._issue.id' out/plan.json 2>/dev/null || echo '')
-          if [ -z "$ISSUE_ID" ]; then exit 0; fi
-
+          if [ ! -f out/plan.json ]; then
+            echo "plan.json なし。通知をスキップします"
+            exit 0
+          fi
           bun -e '
-          import { appendFileSync, readFileSync } from "node:fs";
-          const key = process.env.LINEAR_API_KEY;
-          const issueId = process.argv[1];
-          const runUrl = process.argv[2];
-          fetch("https://api.linear.app/graphql", {
+          const plan = await Bun.file("out/plan.json").json();
+          const issueId = plan?._issue?.id;
+          if (!issueId) { console.log("issue id なし"); process.exit(0); }
+          const res = await fetch("https://api.linear.app/graphql", {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: key },
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: process.env.LINEAR_API_KEY
+            },
             body: JSON.stringify({
-              query: `mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }`,
-              variables: { id: issueId, body: `Video generation failed.\n\nRun: ${runUrl}\n\nCheck the workflow logs for details.` }
+              query: "mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }",
+              variables: {
+                id: issueId,
+                body: "動画生成に失敗しました。\n\nRun: " + process.env.RUN_URL
+              }
             })
           });
-          ' "$ISSUE_ID" "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          console.log("linear notify:", res.status, await res.text());
+          '
