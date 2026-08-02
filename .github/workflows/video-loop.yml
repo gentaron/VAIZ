@@ -48,13 +48,17 @@ jobs:
       - name: Install TTS dependencies
         run: pip install edge-tts
 
-      # ── 日本語フォント + ffmpeg 確認 ──────────────────────
-      - name: Install Japanese font
+      # ── ffmpeg + 日本語フォント ───────────────────────────
+      # ffmpeg は ubuntu-24.04 のランナーイメージから外されているので
+      # 自前で入れる（ubuntu-22.04 時代はプリインストールだった）
+      - name: Install ffmpeg and Japanese font
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-noto-cjk
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk
+          command -v ffmpeg
+          command -v ffprobe
           fc-list | grep -i "Noto Sans CJK JP"
-          ffmpeg -version | head -1
 
       # ── Plan ──────────────────────────────────────────────
       - name: Generate video plan
@@ -62,6 +66,10 @@ jobs:
         env:
           LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # OpenRouter の無料枠が全滅したときのフォールバック用
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
         run: bun run video:plan
 
       # ── Images ────────────────────────────────────────────

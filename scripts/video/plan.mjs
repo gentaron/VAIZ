@@ -19,21 +19,21 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, '..', '..', 'out');
 const TEAM_KEY = process.env.LINEAR_TEAM_KEY || 'GEN';
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 2; // 同一モデルでの再試行回数
+const MAX_TOTAL_CALLS = 12; // 全モデル合計の上限（無限に叩かないための保険）
+const MAX_DISCOVERED = 6; // 動的に拾う無料モデルの数
 
-// 無料モデルは頻繁に入れ替わるので、順に試すフォールバック列にしておく。
-const DEFAULT_MODELS = [
-  'deepseek/deepseek-chat-v3-0324:free',
-  'meta-llama/llama-3.3-70b-instruct:free',
-  'qwen/qwen-2.5-72b-instruct:free',
-  'google/gemma-3-27b-it:free',
-  'mistralai/mistral-small-3.2-24b-instruct:free',
-];
-const MODELS = (process.env.OPENROUTER_MODELS || '')
+// 無料モデルのスラッグは頻繁に入れ替わり、予告なく有料化される。
+// ハードコードした一覧は必ず腐るので、実行時に OpenRouter の
+// モデル一覧から「価格ゼロ」のものを拾う。
+const MANUAL_MODELS = (process.env.OPENROUTER_MODELS || '')
   .split(',')
   .map((m) => m.trim())
   .filter(Boolean);
-const MODEL_CANDIDATES = MODELS.length > 0 ? MODELS : DEFAULT_MODELS;
+
+// Cloudflare Workers AI のテキストモデル（最後の砦）。
+// 画像生成と同じ 1 日 10,000 neurons を食い合うので、小さいモデルを使う。
+const CF_TEXT_MODEL = process.env.CF_TEXT_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast';
 
 // ═══════════════════════════════════════════════════════════════
 // Zod Schema — 動画プラン構造
@@ -231,6 +231,42 @@ function extractJson(content) {
   return JSON.parse(candidate.slice(start, end + 1));
 }
 
+/**
+ * OpenRouter のモデル一覧から、prompt / completion 単価がゼロのものを拾う。
+ * この endpoint は認証不要。失敗しても致命的ではないので空配列を返す。
+ */
+async function discoverFreeModels() {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { data } = await res.json();
+
+    const free = data.filter((m) => {
+      const p = m.pricing || {};
+      const zero = (v) => v !== undefined && parseFloat(v) === 0;
+      if (!zero(p.prompt) || !zero(p.completion)) return false;
+      // テキスト→テキストが使えるものだけ
+      const mod = m.architecture?.modality || '';
+      const outputs = m.architecture?.output_modalities;
+      if (outputs && !outputs.includes('text')) return false;
+      return mod.includes('text');
+    });
+
+    // 文脈長が長い順。プランのプロンプトは短いが、
+    // 極端に小さいモデルは JSON を守れないことが多いので目安にする。
+    const ids = free
+      .sort((a, b) => (b.context_length || 0) - (a.context_length || 0))
+      .map((m) => m.id)
+      .slice(0, MAX_DISCOVERED);
+
+    console.log(`Discovered ${free.length} free models on OpenRouter; trying: ${ids.join(', ')}`);
+    return ids;
+  } catch (err) {
+    console.warn(`Could not fetch OpenRouter model list: ${err.message}`);
+    return [];
+  }
+}
+
 async function callOpenRouter(model, brief, feedback) {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw new Error('OPENROUTER_API_KEY is not set');
@@ -269,17 +305,73 @@ async function callOpenRouter(model, brief, feedback) {
   return extractJson(content);
 }
 
-/** モデル列 × リトライで、Zod 検証を通るプランが出るまで試す */
+/**
+ * 最後の砦: Cloudflare Workers AI。
+ * 画像生成で使う CF の認証情報をそのまま使えるので、
+ * OpenRouter の無料枠が全滅してもループは止まらない。
+ */
+async function callWorkersAI(brief, feedback) {
+  const accountId = process.env.CF_ACCOUNT_ID;
+  const token = process.env.CF_API_TOKEN;
+  if (!accountId || !token) throw new Error('CF_ACCOUNT_ID / CF_API_TOKEN are not set');
+
+  const res = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CF_TEXT_MODEL}`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: buildUserPrompt(brief, feedback) },
+        ],
+        max_tokens: 2000,
+        temperature: 0.7,
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(`Workers AI ${res.status}: ${(await res.text()).substring(0, 300)}`);
+  }
+
+  const json = await res.json();
+  const content = json.result?.response;
+  if (!content) {
+    throw new Error(`Unexpected Workers AI response: ${JSON.stringify(json).substring(0, 300)}`);
+  }
+  return extractJson(content);
+}
+
+/** モデルごと即座に見切るべきエラー（そのモデルでは何度やっても無駄なもの） */
+function isModelDead(message) {
+  // 404/403/400 = 廃止・権限なし・不正なスラッグ、429 = 無料枠の上限
+  return /OpenRouter (400|401|402|403|404|429)/.test(message);
+}
+
+/** 候補モデルを順に試して、Zod 検証を通るプランが出たら返す */
 async function generatePlan(brief) {
+  const discovered = await discoverFreeModels();
+
+  // 明示指定 → 無料オートルーター → 実行時に見つけた無料モデル
+  const candidates = [...new Set([...MANUAL_MODELS, 'openrouter/free', ...discovered])];
+  console.log(`Model candidates (${candidates.length}): ${candidates.join(', ')}`);
+
   let feedback = null;
   let lastError;
+  let calls = 0;
 
-  for (const model of MODEL_CANDIDATES) {
+  for (const model of candidates) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (calls >= MAX_TOTAL_CALLS) {
+        console.warn(`Reached the ${MAX_TOTAL_CALLS}-call budget; giving up on OpenRouter.`);
+        break;
+      }
+      calls++;
+
       try {
-        console.log(`Generating plan with ${model} (attempt ${attempt}/${MAX_ATTEMPTS})...`);
-        const raw = await callOpenRouter(model, brief, feedback);
-        const plan = PlanSchema.parse(raw);
+        console.log(`[${calls}] ${model} (attempt ${attempt}/${MAX_ATTEMPTS})...`);
+        const plan = PlanSchema.parse(await callOpenRouter(model, brief, feedback));
         console.log(`Plan validated (model: ${model}).`);
         return plan;
       } catch (err) {
@@ -287,15 +379,36 @@ async function generatePlan(brief) {
         feedback = err.message.substring(0, 500);
         console.error(`  Failed: ${feedback}`);
 
-        // モデル自体が使えない (404 / 権限 / 廃止) なら次のモデルへ
-        if (/OpenRouter (400|404|403)/.test(err.message)) {
-          console.log('  Model unavailable, trying next candidate.');
+        if (isModelDead(err.message)) {
+          console.log('  Model unavailable for this key — trying next candidate.');
           break;
         }
         if (attempt < MAX_ATTEMPTS) {
-          const delay = 2 ** attempt * 1000;
-          console.log(`  Retrying in ${delay}ms...`);
-          await new Promise((r) => setTimeout(r, delay));
+          await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+        }
+      }
+    }
+    if (calls >= MAX_TOTAL_CALLS) break;
+  }
+
+  // OpenRouter が全滅した場合のみ Cloudflare へ
+  if (process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN) {
+    console.warn('\nAll OpenRouter candidates failed. Falling back to Cloudflare Workers AI.');
+    console.warn(
+      `NOTE: ${CF_TEXT_MODEL} は画像生成と同じ 1 日 10,000 neurons を消費します。`,
+    );
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        console.log(`Workers AI ${CF_TEXT_MODEL} (attempt ${attempt}/${MAX_ATTEMPTS})...`);
+        const plan = PlanSchema.parse(await callWorkersAI(brief, feedback));
+        console.log(`Plan validated (model: ${CF_TEXT_MODEL}).`);
+        return plan;
+      } catch (err) {
+        lastError = err;
+        feedback = err.message.substring(0, 500);
+        console.error(`  Failed: ${feedback}`);
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
         }
       }
     }
@@ -375,7 +488,12 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+// 直接実行されたときだけ走らせる（テストから import できるように）
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}
+
+export { discoverFreeModels, extractJson, PlanSchema };
