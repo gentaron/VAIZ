@@ -3,3 +3,5 @@ out/
 *.mp4
 *.wav
 !scripts/video/tts_helper.py
+
+__pycache__/

@@ -7,15 +7,15 @@ Linear から企画を自動で取得し、テキスト→画像→音声→動�
 ```
 Linear Issue (agent-ready, Todo)
   │
-  ▼ plan.mjs — OpenRouter 無料モデルで動画プラン JSON 生成
-  │  out/plan.json
+  ▼ plan.mjs — Issue を claim して OpenRouter 無料モデルで動画プラン JSON 生成
+  │  out/claim.json, out/plan.json
   ▼ images.mjs — Cloudflare Workers AI (Flux 1 Schnell) で画像生成
-  │  out/img/{0..N}.png
-  ▼ tts.mjs — Kokoro / edge-tts で日本語音声生成
+  │  out/img/{0..N}.jpg
+  ▼ tts.mjs — edge-tts で日本語音声生成
   │  out/audio/{0..N}.wav + out/timing.json
   ▼ render.mjs — ffmpeg で動画合成 (Ken Burns, xfade, ASS 字幕)
   │  out/final.mp4
-  ▼ publish.mjs — GitHub Release (draft) + Linear にコメント
+  ▼ publish.mjs — GitHub Release (draft) + Linear にコメント → In Review
 ```
 
 ## 入出力の契約 (疎結合設計)
@@ -24,11 +24,14 @@ Linear Issue (agent-ready, Todo)
 
 | ファイル | 形式 | 生成元 | 消費先 |
 |----------|------|--------|--------|
+| `out/claim.json` | JSON `{id, identifier, title}` | plan.mjs (claim 直後) | notify-failure.mjs |
 | `out/plan.json` | JSON | plan.mjs | images.mjs, tts.mjs, render.mjs, publish.mjs |
-| `out/img/{i}.png` | PNG (任意サイズ) | images.mjs | render.mjs |
-| `out/audio/{i}.wav` | WAV PCM | tts.mjs | render.mjs |
+| `out/img/{i}.jpg` | JPEG / PNG / WebP (任意サイズ) | images.mjs | render.mjs |
+| `out/audio/{i}.wav` | WAV PCM 24kHz mono | tts.mjs | render.mjs |
 | `out/timing.json` | JSON `[{index, file, duration}]` | tts.mjs | render.mjs |
 | `out/final.mp4` | H.264 / yuv420p / 1080x1920 / 30fps | render.mjs | publish.mjs |
+
+`claim.json` を `plan.json` より先に書くのは、プラン生成でコケたときにも「どの Issue を掴んでいたか」を失敗通知に伝えるため。
 
 ### plan.json スキーマ
 
@@ -49,8 +52,19 @@ Linear Issue (agent-ready, Todo)
 ```
 
 - シーン数: 6〜8
-- 合計秒数: 45〜60
+- 合計秒数: 45〜60 が目標（35〜80 までは通す。実尺は TTS の実測値で決まるので `seconds` は目安）
 - 各シーン秒数: 3〜15
+
+## 尺の決まり方
+
+`seconds` は使わず、`timing.json` の実測値だけでタイムラインを組む。字幕・音声・映像はすべてこの 1 つの計算結果を共有するので、ずれない。
+
+```
+clip[i] の尺       = 0.3s + narration[i] の実測尺 + 0.3s
+clip[i] の開始位置 = clip[i-1] の開始位置 + clip[i-1] の尺 - 0.4s (xfade の重なり)
+音声[i] の開始位置 = clip[i] の開始位置 + 0.3s
+字幕[i] の表示区間 = 音声[i] と完全に一致
+```
 
 ## 必要 Secrets
 
@@ -61,34 +75,72 @@ Linear Issue (agent-ready, Todo)
 | `CF_ACCOUNT_ID` | Cloudflare Workers AI で画像生成 | Cloudflare Dashboard > Workers & Pages |
 | `CF_API_TOKEN` | 同上 | Cloudflare Dashboard > My Profile > API Tokens |
 
+`GITHUB_TOKEN` は Actions が自動で渡すので設定不要。
+
+### 任意の環境変数 / Repository variables
+
+| 変数 | 既定値 | 用途 |
+|------|--------|------|
+| `LINEAR_TEAM_KEY` | `GEN` | 対象の Linear チーム |
+| `OPENROUTER_MODELS` | 下記の 5 モデル | カンマ区切り。先頭から順に試す |
+| `TTS_VOICE` | `ja-JP-NanamiNeural` | edge-tts の音声（男性なら `ja-JP-KeitaNeural`） |
+| `TTS_RATE` | `+0%` | 読み上げ速度（例 `+10%`） |
+
+OpenRouter の無料モデルは頻繁に入れ替わるので、既定でフォールバック列を持つ:
+deepseek-chat-v3-0324 → llama-3.3-70b → qwen-2.5-72b → gemma-3-27b → mistral-small-3.2。
+404 / 403 が返ったモデルは即座に次の候補へ送る。
+
 ## ローカル実行
 
 ```bash
 bun install
-bun run video:plan      # → out/plan.json
+bun run video:plan      # → out/claim.json, out/plan.json
 bun run video:images    # → out/img/
 bun run video:tts       # → out/audio/ + out/timing.json
 bun run video:render    # → out/final.mp4
-bun run video:publish   # → GitHub Release
+bun run video:publish   # → GitHub Release (draft)
 ```
 
-各スクリプトは単体で実行可能。前段の `out/` ファイルが必要。
+各スクリプトは単体で実行可能。前段の `out/` ファイルが必要。ffmpeg / ffprobe と日本語フォント (`fonts-noto-cjk`) が要る。
+
+`images.mjs` は生成済みの `out/img/{i}.*` を読み飛ばすので、途中で落ちても再実行で続きから走る。
 
 ## GitHub Actions
 
 - **cron**: 毎日 22:00 UTC 自動起動
 - **手動**: Actions タブ > VAIZ Video Loop > Run workflow
-- concurrency グループで多重起動を防止
+- concurrency グループで多重起動を防止（`cancel-in-progress: false` — レンダリング中の実行は殺さない）
 - どのステップで失敗しても `out/` を artifact に保存
+
+### 失敗したときの扱い
+
+| 失敗箇所 | Issue の行き先 |
+|----------|----------------|
+| プラン生成 (plan.mjs) | 自動で **Todo** に戻す + 理由をコメント。次回の cron で再挑戦 |
+| 画像 / 音声 / 描画 / 公開 | **In Progress** のまま + 実行ログをコメント |
+
+後段の失敗で Todo に戻さないのは、原因が直っていないのに毎晩リトライして無料枠を食い潰すのを避けるため。直したら手動で Run workflow する。
 
 ## 使用する無料サービス
 
 | サービス | 用途 | ライセンス | コスト |
 |----------|------|------------|--------|
-| OpenRouter (deepseek-chat-v3-0324:free) | プラン生成 | — | 無料 |
+| OpenRouter (`:free` モデル) | プラン生成 | — | 無料 |
 | Cloudflare Workers AI (Flux 1 Schnell) | 画像生成 | Apache 2.0 | 無料枠内 |
-| Kokoro-onnx | 日本語 TTS (第一候補) | Apache 2.0 | CPU 推論 / 無料 |
-| edge-tts | 日本語 TTS (フォールバック) | MIT | 無料 |
+| edge-tts | 日本語 TTS | GPL-3.0 (CLI) | 無料 / APIキー不要 |
+| ffmpeg | 動画合成 | LGPL/GPL | ランナーにプリインストール |
+
+### なぜ Kokoro を使っていないか
+
+Kokoro v0.19 は英語専用モデルで、日本語の音素化ができない。voice に `ja-JP-*` を渡しても必ず失敗するため、実質 edge-tts フォールバックしか動いていなかった。日本語対応の Kokoro v1.0 は misaki[ja] (fugashi / unidic / pyopenjtalk) が必要で、CI で毎回 300MB 超を入れることになる。「完全無料 + CI で軽い」という前提では edge-tts が正解なので、Kokoro とそのモデルキャッシュは外した。
+
+戻したくなった場合は `scripts/video/tts_helper.py` の `synthesize()` だけ差し替えればよい（`--text` / `--output` を受けて WAV を書き、秒数を stdout に出す、という契約は変わらない）。
+
+### 既知のリスク
+
+edge-tts は Microsoft の公開エンドポイントを叩いているので、データセンター IP からのアクセスが 403 で弾かれることが稀にある。その場合 TTS ステップが明示的に失敗し、Linear に通知が飛ぶ（無音のまま先に進むことはない）。
+
+Release は `draft: true` で作るため、コメントに載る Download URL はリポジトリへのアクセス権がないと開けない。
 
 ## ライセンス
 
