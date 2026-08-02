@@ -82,13 +82,25 @@ clip[i] の開始位置 = clip[i-1] の開始位置 + clip[i-1] の尺 - 0.4s (x
 | 変数 | 既定値 | 用途 |
 |------|--------|------|
 | `LINEAR_TEAM_KEY` | `GEN` | 対象の Linear チーム |
-| `OPENROUTER_MODELS` | 下記の 5 モデル | カンマ区切り。先頭から順に試す |
+| `OPENROUTER_MODELS` | (なし) | カンマ区切り。指定すると最優先で試す |
 | `TTS_VOICE` | `ja-JP-NanamiNeural` | edge-tts の音声（男性なら `ja-JP-KeitaNeural`） |
 | `TTS_RATE` | `+0%` | 読み上げ速度（例 `+10%`） |
+| `CF_TEXT_MODEL` | `@cf/meta/llama-3.1-8b-instruct-fast` | OpenRouter 全滅時のフォールバック |
 
-OpenRouter の無料モデルは頻繁に入れ替わるので、既定でフォールバック列を持つ:
-deepseek-chat-v3-0324 → llama-3.3-70b → qwen-2.5-72b → gemma-3-27b → mistral-small-3.2。
-404 / 403 が返ったモデルは即座に次の候補へ送る。
+### モデルの選び方
+
+無料モデルのスラッグは予告なく有料化されるので、一覧をハードコードしていない。
+実行時に OpenRouter の `/api/v1/models`（認証不要）から prompt / completion 単価が
+ゼロのモデルを拾い、文脈長の長い順に試す。
+
+```
+OPENROUTER_MODELS の指定  →  openrouter/free (オートルーター)
+  →  実行時に見つけた無料モデル 上位6件  →  Cloudflare Workers AI
+```
+
+404 / 403 / 429 が返ったモデルは再試行せず次の候補へ送る（そのキーでは何度叩いても同じなので）。
+全滅した場合のみ Cloudflare Workers AI (`@cf/meta/llama-3.1-8b-instruct-fast`) に落ちる。
+CF は画像生成と同じ 1 日 10,000 neurons を食うので、あくまで最後の砦。
 
 ## ローカル実行
 
@@ -102,6 +114,8 @@ bun run video:publish   # → GitHub Release (draft)
 ```
 
 各スクリプトは単体で実行可能。前段の `out/` ファイルが必要。ffmpeg / ffprobe と日本語フォント (`fonts-noto-cjk`) が要る。
+
+> ffmpeg は ubuntu-24.04 のランナーイメージから外されているので、ワークフローで `apt-get install ffmpeg` している。ubuntu-22.04 時代のプリインストール前提ではもう動かない。
 
 `images.mjs` は生成済みの `out/img/{i}.*` を読み飛ばすので、途中で落ちても再実行で続きから走る。
 
@@ -125,10 +139,11 @@ bun run video:publish   # → GitHub Release (draft)
 
 | サービス | 用途 | ライセンス | コスト |
 |----------|------|------------|--------|
-| OpenRouter (`:free` モデル) | プラン生成 | — | 無料 |
+| OpenRouter (無料モデル) | プラン生成 | — | 無料 |
 | Cloudflare Workers AI (Flux 1 Schnell) | 画像生成 | Apache 2.0 | 無料枠内 |
 | edge-tts | 日本語 TTS | GPL-3.0 (CLI) | 無料 / APIキー不要 |
-| ffmpeg | 動画合成 | LGPL/GPL | ランナーにプリインストール |
+| Cloudflare Workers AI (Llama 3.1 8B) | プラン生成のフォールバック | — | 無料枠内（画像と共用） |
+| ffmpeg | 動画合成 | LGPL/GPL | 無料（apt で導入） |
 
 ### なぜ Kokoro を使っていないか
 
@@ -137,6 +152,10 @@ Kokoro v0.19 は英語専用モデルで、日本語の音素化ができない�
 戻したくなった場合は `scripts/video/tts_helper.py` の `synthesize()` だけ差し替えればよい（`--text` / `--output` を受けて WAV を書き、秒数を stdout に出す、という契約は変わらない）。
 
 ### 既知のリスク
+
+OpenRouter の無料枠は縮小傾向にある。2026-08 時点で deepseek / llama-3.3-70b / qwen-2.5-72b /
+gemma-3-27b / mistral-small の `:free` はいずれも 404（有料版へ誘導）になっていた。
+動的探索と Cloudflare フォールバックを入れてあるのはこのため。
 
 edge-tts は Microsoft の公開エンドポイントを叩いているので、データセンター IP からのアクセスが 403 で弾かれることが稀にある。その場合 TTS ステップが明示的に失敗し、Linear に通知が飛ぶ（無音のまま先に進むことはない）。
 
