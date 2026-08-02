@@ -2,17 +2,16 @@
  * VAIZ — TTS (Text-to-Speech)
  *
  * plan.json の各 scene.narration を日本語音声に変換する。
- * 第一候補: Kokoro (CPU 推論, Apache 2.0)
- * フォールバック: edge-tts
+ * エンジンは edge-tts (無料 / APIキー不要 / 日本語ネイティブ音声)。
  *
  * 使い方: bun run scripts/video/tts.mjs
- * 環境変数: なし (Python + pip 必須)
+ * 環境変数: (任意) TTS_VOICE, TTS_RATE
  * 入力: out/plan.json
- * 出力: out/audio/{0..N}.wav, out/timing.json
+ * 出力: out/audio/{0..N}.wav (24kHz mono PCM), out/timing.json
  */
 
 import fs from 'node:fs/promises';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,44 +20,53 @@ const ROOT_DIR = path.join(__dirname, '..', '..');
 const OUT_DIR = path.join(ROOT_DIR, 'out');
 const AUDIO_DIR = path.join(OUT_DIR, 'audio');
 const TTS_HELPER = path.join(__dirname, 'tts_helper.py');
+const PYTHON = process.env.PYTHON_BIN || 'python3';
 
 // ═══════════════════════════════════════════════════════════════
-// Python 環境セットアップ
+// 依存確認 — 入っていないときだけ入れる
 // ═══════════════════════════════════════════════════════════════
 function ensureDeps() {
-  console.log('Installing Python TTS dependencies...');
-  const pipOpts = '--break-system-packages';
   try {
-    execSync(`pip install ${pipOpts} edge-tts 2>&1 | tail -1`, { stdio: 'inherit' });
+    execFileSync(PYTHON, ['-c', 'import edge_tts'], { stdio: 'pipe' });
+    console.log('edge-tts is available.');
+    return;
   } catch {
-    console.warn('edge-tts install failed, will try anyway');
+    console.log('edge-tts not found. Installing...');
   }
-  try {
-    execSync(`pip install ${pipOpts} kokoro-onnx huggingface_hub soundfile numpy 2>&1 | tail -3`, {
-      stdio: 'inherit',
-    });
-  } catch {
-    console.warn('kokoro-onnx install failed, will fallback to edge-tts');
+
+  // system Python 直下だと PEP 668 で弾かれるので、その場合だけ緩める
+  for (const extra of [[], ['--break-system-packages']]) {
+    try {
+      execFileSync(PYTHON, ['-m', 'pip', 'install', '--quiet', ...extra, 'edge-tts'], {
+        stdio: 'inherit',
+      });
+      return;
+    } catch {
+      /* 次の組み合わせを試す */
+    }
   }
+  throw new Error('Failed to install edge-tts');
 }
 
 // ═══════════════════════════════════════════════════════════════
 // 1 クリップの TTS を実行 → 秒数を返す
 // ═══════════════════════════════════════════════════════════════
 function synthesizeOne(index, text, outPath) {
-  console.log(`  [${index}] Synthesizing: ${text.substring(0, 50)}...`);
+  console.log(`  [${index}] ${text.substring(0, 40)}...`);
 
-  const result = execSync(
-    `python3 "${TTS_HELPER}" --text ${JSON.stringify(text)} --output "${outPath}"`,
-    { encoding: 'utf-8', timeout: 120_000 },
-  );
+  // execFileSync なのでシェルを経由しない = 日本語やクォートのエスケープ不要
+  const stdout = execFileSync(PYTHON, [TTS_HELPER, '--text', text, '--output', outPath], {
+    encoding: 'utf-8',
+    timeout: 180_000,
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
 
-  const duration = parseFloat(result.trim());
-  if (isNaN(duration) || duration <= 0) {
-    throw new Error(`Invalid duration for scene ${index}: ${result.trim()}`);
+  const duration = parseFloat(stdout.trim());
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error(`Invalid duration for scene ${index}: "${stdout.trim()}"`);
   }
 
-  console.log(`  [${index}] Duration: ${duration.toFixed(2)}s`);
+  console.log(`  [${index}] → ${duration.toFixed(2)}s`);
   return duration;
 }
 
@@ -70,10 +78,7 @@ async function main() {
 
   ensureDeps();
 
-  const planPath = path.join(OUT_DIR, 'plan.json');
-  const planRaw = await fs.readFile(planPath, 'utf-8');
-  const plan = JSON.parse(planRaw);
-
+  const plan = JSON.parse(await fs.readFile(path.join(OUT_DIR, 'plan.json'), 'utf-8'));
   if (!plan.scenes || plan.scenes.length === 0) {
     throw new Error('plan.json has no scenes');
   }
@@ -81,19 +86,21 @@ async function main() {
   await fs.mkdir(AUDIO_DIR, { recursive: true });
 
   const timing = [];
-
   for (let i = 0; i < plan.scenes.length; i++) {
-    const outPath = path.join(AUDIO_DIR, `${i}.wav`);
-    const duration = synthesizeOne(i, plan.scenes[i].narration, outPath);
-    timing.push({ index: i, file: `${i}.wav`, duration });
+    const file = `${i}.wav`;
+    const duration = synthesizeOne(i, plan.scenes[i].narration, path.join(AUDIO_DIR, file));
+    timing.push({ index: i, file, duration });
   }
 
-  const timingPath = path.join(OUT_DIR, 'timing.json');
-  await fs.writeFile(timingPath, JSON.stringify(timing, null, 2), 'utf-8');
+  await fs.writeFile(
+    path.join(OUT_DIR, 'timing.json'),
+    JSON.stringify(timing, null, 2),
+    'utf-8',
+  );
 
   const total = timing.reduce((s, t) => s + t.duration, 0);
-  console.log(`\nDone. ${timing.length} audio clips, ${total.toFixed(2)}s total`);
-  console.log(`Timing saved to out/timing.json`);
+  console.log(`\nDone. ${timing.length} clips, ${total.toFixed(2)}s of narration.`);
+  console.log('Timing saved to out/timing.json');
 }
 
 main().catch((err) => {

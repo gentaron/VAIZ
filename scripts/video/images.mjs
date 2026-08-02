@@ -7,7 +7,9 @@
  * 使い方: bun run scripts/video/images.mjs
  * 環境変数: CF_ACCOUNT_ID, CF_API_TOKEN
  * 入力: out/plan.json
- * 出力: out/img/{0..N}.png  (1080x1920 縦型)
+ * 出力: out/img/{0..N}.jpg  (flux は JPEG を返す。PNG が返れば .png)
+ *
+ * NOTE: 縦型化 (1080x1920) は render.mjs 側で行う。ここでは元画像をそのまま保存する。
  */
 
 import fs from 'node:fs/promises';
@@ -18,9 +20,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const OUT_DIR = path.join(ROOT_DIR, 'out');
 const IMG_DIR = path.join(OUT_DIR, 'img');
-const TARGET_W = 1080;
-const TARGET_H = 1920;
+const MODEL = '@cf/black-forest-labs/flux-1-schnell';
+const MAX_ATTEMPTS = 5;
 const MAX_BACKOFF_MS = 30_000;
+const MAX_PROMPT_CHARS = 2048; // flux-1-schnell の入力上限
 
 // ═══════════════════════════════════════════════════════════════
 // Cloudflare Workers AI — Flux 1 Schnell
@@ -31,7 +34,7 @@ async function generateImage(prompt) {
   if (!accountId) throw new Error('CF_ACCOUNT_ID is not set');
   if (!token) throw new Error('CF_API_TOKEN is not set');
 
-  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${MODEL}`;
 
   const res = await fetch(url, {
     method: 'POST',
@@ -39,40 +42,63 @@ async function generateImage(prompt) {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
+    // flux-1-schnell が受け付けるのは prompt と steps だけ。
+    // 余計なフィールド (num_steps 等) を送るとスキーマ検証で弾かれる。
     body: JSON.stringify({
-      prompt,
-      image: [],
-      num_steps: 4,
+      prompt: prompt.substring(0, MAX_PROMPT_CHARS),
+      steps: 4,
     }),
   });
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`CF Workers AI ${res.status}: ${body}`);
+    const err = new Error(`CF Workers AI ${res.status}: ${body.substring(0, 300)}`);
+    err.status = res.status;
+    throw err;
   }
 
-  // レスポンスは image octet-stream (base64 またはバイナリ)
+  // 通常は JSON ({ result: { image: "<base64 JPEG>" } })。
+  // 将来バイナリを直接返すようになっても壊れないよう両対応にしておく。
   const contentType = res.headers.get('content-type') || '';
   if (contentType.includes('image')) {
-    return new Uint8Array(await res.arrayBuffer());
+    return Buffer.from(await res.arrayBuffer());
   }
 
-  // JSON レスポンスの場合 (image b64)
   const json = await res.json();
-  if (json.result?.image) {
-    return Uint8Array.from(atob(json.result.image), (c) => c.charCodeAt(0));
-  }
-  throw new Error('Unexpected response format from CF Workers AI');
+  if (json.result?.image) return Buffer.from(json.result.image, 'base64');
+
+  throw new Error(
+    `Unexpected response from CF Workers AI: ${JSON.stringify(json).substring(0, 300)}`,
+  );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 画像を 1080x1920 にパディング/クロップ (canvas-free, 純 JS)
-// ═══════════════════════════════════════════════════════════════
-async function padToVertical(imgBytes) {
-  // ffmpeg でリサイズする方が確実なので、画像はそのまま保存し
-  // render.mjs 側で pad/crop する設計にする。
-  // ここでは raw bytes をそのまま返す。
-  return imgBytes;
+/** マジックバイトから拡張子を決める (flux は JPEG を返す) */
+function extensionFor(buf) {
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'jpg';
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'png';
+  if (buf.subarray(8, 12).toString('ascii') === 'WEBP') return 'webp';
+  return 'jpg';
+}
+
+/** すでに生成済みのシーンがあれば読み飛ばす (途中失敗からの再開用) */
+async function existingImage(i) {
+  for (const ext of ['jpg', 'png', 'webp']) {
+    const p = path.join(IMG_DIR, `${i}.${ext}`);
+    try {
+      const st = await fs.stat(p);
+      if (st.size > 0) return p;
+    } catch {
+      /* not found */
+    }
+  }
+  return null;
+}
+
+function isRetryable(err) {
+  if (err.status === 429) return true;
+  if (err.status >= 500) return true;
+  // fetch レベルのネットワークエラー (status なし)
+  return err.status === undefined;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -83,36 +109,38 @@ async function generateAll(scenes) {
   const results = [];
 
   for (let i = 0; i < scenes.length; i++) {
-    const scene = scenes[i];
-    let delay = 1000;
-    let success = false;
+    const cached = await existingImage(i);
+    if (cached) {
+      console.log(`  [${i}] Already exists, skipping (${path.basename(cached)})`);
+      results.push(cached);
+      continue;
+    }
 
-    for (let attempt = 1; attempt <= 5 && !success; attempt++) {
+    let delay = 2000;
+    let saved = null;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !saved; attempt++) {
       try {
-        console.log(`  [${i}] Generating (attempt ${attempt})...`);
-        const imgBytes = await generateImage(scene.image_prompt);
-        const padded = await padToVertical(imgBytes);
-        const outPath = path.join(IMG_DIR, `${i}.png`);
-        await fs.writeFile(outPath, padded);
-        results.push(outPath);
-        success = true;
-        console.log(`  [${i}] Saved ${outPath}`);
-      } catch (err) {
-        const isRateLimit =
-          err.message.includes('429') ||
-          err.message.includes('rate') ||
-          err.message.includes('too many');
+        console.log(`  [${i}] Generating (attempt ${attempt}/${MAX_ATTEMPTS})...`);
+        const buf = await generateImage(scenes[i].image_prompt);
+        if (buf.length === 0) throw new Error('Empty image payload');
 
-        if (!isRateLimit || attempt === 5) {
+        const outPath = path.join(IMG_DIR, `${i}.${extensionFor(buf)}`);
+        await fs.writeFile(outPath, buf);
+        saved = outPath;
+        console.log(`  [${i}] Saved ${path.basename(outPath)} (${(buf.length / 1024).toFixed(0)} KB)`);
+      } catch (err) {
+        if (!isRetryable(err) || attempt === MAX_ATTEMPTS) {
           console.error(`  [${i}] Failed: ${err.message}`);
           throw err;
         }
-
-        console.warn(`  [${i}] Rate limited. Waiting ${delay}ms...`);
+        console.warn(`  [${i}] ${err.message} — retrying in ${delay}ms`);
         await new Promise((r) => setTimeout(r, delay));
         delay = Math.min(delay * 2, MAX_BACKOFF_MS);
       }
     }
+
+    results.push(saved);
   }
 
   return results;
@@ -124,17 +152,15 @@ async function generateAll(scenes) {
 async function main() {
   console.log('=== VAIZ Image Generator ===');
 
-  const planPath = path.join(OUT_DIR, 'plan.json');
-  const planRaw = await fs.readFile(planPath, 'utf-8');
-  const plan = JSON.parse(planRaw);
+  const plan = JSON.parse(await fs.readFile(path.join(OUT_DIR, 'plan.json'), 'utf-8'));
 
   if (!plan.scenes || plan.scenes.length === 0) {
     throw new Error('plan.json has no scenes');
   }
 
-  console.log(`Generating ${plan.scenes.length} images...`);
+  console.log(`Generating ${plan.scenes.length} images with ${MODEL}...`);
   const paths = await generateAll(plan.scenes);
-  console.log(`Done. ${paths.length} images saved to out/img/`);
+  console.log(`Done. ${paths.length} images in out/img/`);
 }
 
 main().catch((err) => {
