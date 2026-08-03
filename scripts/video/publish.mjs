@@ -41,6 +41,75 @@ async function gql(query, variables = {}) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Linear に動画ファイル本体をアップロード
+//
+// draft release は書き込み権限のある人にしか見えず、Tags にも出ない。
+// リンクだけ渡しても踏めないことがあるので、実体を Linear にも置いて
+// Issue 上でそのまま再生できるようにする。
+//
+// 3 段構え:
+//   1. fileUpload ミューテーションで署名付き URL を発行
+//   2. その URL に PUT で生バイトを送る (Google Cloud Storage 直送)
+//   3. attachmentCreate で assetUrl を Issue に紐付ける
+//
+// 署名付き URL の有効期限は 60 秒。発行と PUT の間に他の API 呼び出しを
+// 挟むと期限切れになるので、この関数の中で一気にやりきる。
+// ═══════════════════════════════════════════════════════════════
+async function uploadFileToLinear(filePath, fileName, contentType) {
+  const bytes = await fs.readFile(filePath);
+
+  console.log(`Uploading ${fileName} to Linear (${(bytes.length / 1024 / 1024).toFixed(1)}MB)...`);
+
+  const data = await gql(
+    `mutation($contentType: String!, $filename: String!, $size: Int!) {
+      fileUpload(contentType: $contentType, filename: $filename, size: $size) {
+        success
+        uploadFile {
+          assetUrl
+          uploadUrl
+          headers { key value }
+        }
+      }
+    }`,
+    { contentType, filename: fileName, size: bytes.length },
+  );
+
+  const uploadFile = data.fileUpload?.uploadFile;
+  if (!data.fileUpload?.success || !uploadFile) {
+    throw new Error('Linear fileUpload did not return an upload target');
+  }
+
+  // 署名対象のヘッダを 1 つでも欠くと 403 になるので、返ってきたものは
+  // そのまま全部付けて送る。
+  // ここで素のオブジェクトを使うと 'Content-Type' と 'content-type' が
+  // 別キーになり content-type が二重に飛ぶ。Headers なら正規化される。
+  const headers = new Headers();
+  headers.set('Content-Type', contentType);
+  for (const h of uploadFile.headers || []) headers.set(h.key, h.value);
+
+  const res = await fetch(uploadFile.uploadUrl, { method: 'PUT', headers, body: bytes });
+  if (!res.ok) {
+    throw new Error(`Linear upload PUT ${res.status}: ${(await res.text()).substring(0, 300)}`);
+  }
+
+  console.log(`Uploaded to Linear: ${uploadFile.assetUrl}`);
+  return uploadFile.assetUrl;
+}
+
+/** アップロード済みの assetUrl を Issue の添付として登録する */
+async function attachToLinear(issueId, assetUrl, title, subtitle) {
+  await gql(
+    `mutation($issueId: String!, $url: String!, $title: String!, $subtitle: String) {
+      attachmentCreate(input: {
+        issueId: $issueId, url: $url, title: $title, subtitle: $subtitle
+      }) { success }
+    }`,
+    { issueId, url: assetUrl, title, subtitle: subtitle || null },
+  );
+  console.log('Attached to Linear issue.');
+}
+
+// ═══════════════════════════════════════════════════════════════
 // GitHub Release 作成
 // ═══════════════════════════════════════════════════════════════
 function ghHeaders(token, extra = {}) {
@@ -181,6 +250,21 @@ async function main() {
   const release = await createRelease(apiBase, token, baseTag, releaseName);
   const asset = await uploadAsset(release, token, finalPath, fileName);
 
+  // 動画本体を Linear にも上げておく。Release は既にあるので、
+  // ここが落ちても警告だけ出して続行する。
+  let linearAssetUrl = null;
+  try {
+    linearAssetUrl = await uploadFileToLinear(finalPath, fileName, 'video/mp4');
+    await attachToLinear(
+      issueId,
+      linearAssetUrl,
+      plan.title || fileName,
+      `${plan.scenes.length} scenes · ${date}`,
+    );
+  } catch (err) {
+    console.warn(`Linear upload failed (continuing): ${err.message}`);
+  }
+
   const sizeMb = ((await fs.stat(finalPath)).size / 1024 / 1024).toFixed(1);
   const comment = [
     '動画を生成しました。内容を確認してから公開してください。',
@@ -188,6 +272,11 @@ async function main() {
     `**${plan.title}**`,
     `フック: ${plan.hook}`,
     `シーン数: ${plan.scenes.length} / ファイルサイズ: ${sizeMb}MB`,
+    '',
+    // Linear 上の実体。ここからならアクセス権に関係なく再生できる
+    linearAssetUrl
+      ? `[${fileName}](${linearAssetUrl})`
+      : '_Linear へのアップロードに失敗しました。下の Release から取得してください。_',
     '',
     `Draft Release: ${release.html_url}`,
     `Download: ${asset.browser_download_url}`,
@@ -202,6 +291,7 @@ async function main() {
   console.log('\n=== Published ===');
   console.log(`Release: ${release.html_url}`);
   console.log(`Download: ${asset.browser_download_url}`);
+  if (linearAssetUrl) console.log(`Linear asset: ${linearAssetUrl}`);
 }
 
 main().catch((err) => {
