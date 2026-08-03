@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(__dirname, '..', '..', 'out');
 const TEAM_KEY = process.env.LINEAR_TEAM_KEY || 'GEN';
+const LABEL_NAME = process.env.LINEAR_LABEL || 'agent-ready';
 const MAX_ATTEMPTS = 2; // 同一モデルでの再試行回数
 const MAX_TOTAL_CALLS = 12; // 全モデル合計の上限（無限に叩かないための保険）
 const MAX_DISCOVERED = 6; // 動的に拾う無料モデルの数
@@ -92,14 +93,13 @@ async function gql(query, variables = {}) {
 
 /** agent-ready ラベル付きの最も古い Todo Issue を 1 件 claim して In Progress へ */
 async function claimIssue() {
-  // チーム情報 + ラベル一覧を取得
+  // チームのワークフロー state を取得
   const teamData = await gql(
     `query($key: String!) {
       teams(filter: { key: { eq: $key } }, first: 1) {
         nodes {
           id
           states { nodes { id name } }
-          labels { nodes { id name } }
         }
       }
     }`,
@@ -114,20 +114,21 @@ async function claimIssue() {
   if (!todoState) throw new Error('Todo state not found');
   if (!inProgressState) throw new Error('In Progress state not found');
 
-  const agentReadyLabel = team.labels.nodes.find((l) => l.name === 'agent-ready');
-  if (!agentReadyLabel) throw new Error(`Label "agent-ready" not found in team ${TEAM_KEY}`);
-
   // agent-ready + Todo の Issue を取得
   //
   // NOTE: Linear の orderBy は PaginationOrderBy 列挙型 (createdAt / updatedAt) で、
   // 方向は指定できず常に降順。古い順が欲しいのでクライアント側で並べ替える。
+  //
+  // ラベルは ID を引かずに名前で直接絞る。team.labels はチームスコープの
+  // ラベルしか返さないので、agent-ready がワークスペースラベルとして
+  // 作られていると ID 引きでは «not found» になってしまう。
   const issuesData = await gql(
-    `query($teamId: ID!, $stateId: ID!, $labelId: ID!) {
+    `query($teamId: ID!, $stateId: ID!, $labelName: String!) {
       issues(
         filter: {
           team: { id: { eq: $teamId } }
           state: { id: { eq: $stateId } }
-          labels: { some: { id: { eq: $labelId } } }
+          labels: { some: { name: { eq: $labelName } } }
         }
         first: 50
         orderBy: createdAt
@@ -135,14 +136,14 @@ async function claimIssue() {
         nodes { id identifier title description createdAt }
       }
     }`,
-    { teamId: team.id, stateId: todoState.id, labelId: agentReadyLabel.id },
+    { teamId: team.id, stateId: todoState.id, labelName: LABEL_NAME },
   );
 
   const nodes = [...issuesData.issues.nodes].sort(
     (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
   );
   if (nodes.length === 0) {
-    console.log('No agent-ready issues in Todo. Nothing to do.');
+    console.log(`No "${LABEL_NAME}" issues in Todo for team ${TEAM_KEY}. Nothing to do.`);
     return null;
   }
 

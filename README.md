@@ -15,8 +15,29 @@ Linear Issue (agent-ready, Todo)
   │  out/audio/{0..N}.wav + out/timing.json
   ▼ render.mjs — ffmpeg で動画合成 (Ken Burns, xfade, ASS 字幕)
   │  out/final.mp4
-  ▼ publish.mjs — GitHub Release (draft) + Linear にコメント → In Review
+  ▼ publish.mjs — GitHub Release (draft) + Linear に動画本体を添付 → In Review
 ```
+
+## 生成物の受け取り先
+
+| 場所 | 中身 | 備考 |
+|------|------|------|
+| Linear Issue の添付 + コメント | final.mp4 本体 | その場で再生できる。通常はここ |
+| GitHub Releases (draft) | final.mp4 | 書き込み権限のある人にのみ表示。Tags には出ない |
+| Actions の Artifacts | `out/` 丸ごと | publish が失敗したときの回収用 |
+
+draft release は権限のある人しか見られず Tags にも出ないため、`publish.mjs` は
+動画ファイルの実体を Linear にもアップロードする。手順は 3 段階。
+
+1. `fileUpload` ミューテーションで署名付き URL を発行
+2. その URL へ PUT で生バイトを送る（Google Cloud Storage 直送）
+3. `attachmentCreate` で `assetUrl` を Issue に紐付ける
+
+署名付き URL の**有効期限は 60 秒**なので、発行したら即 PUT すること。返って
+きたヘッダは 1 つでも欠けると 403 になるので全部そのまま送る。ヘッダの組み立てに
+素のオブジェクトを使うと `Content-Type` と `content-type` が別キーになり
+content-type が二重に飛ぶため、`Headers` で正規化している。
+アップロード上限は 2GB。Linear 側が失敗しても Release は既にあるので中断しない。
 
 ## 入出力の契約 (疎結合設計)
 
