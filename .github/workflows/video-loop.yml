@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 22 * * *' # 毎日 22:00 UTC (マレーシア時間 翌 06:00)
   workflow_dispatch: {} # 手動実行
+  # Genesis Vault が記事から動画ブリーフを Linear に積んだ直後に叩いてくる。
+  # 上流にトークンが無ければ飛んでこないだけで、cron が同じ Issue を拾う。
+  # つまりこれは高速化であって、動作の前提ではない。
+  repository_dispatch:
+    types: [video-brief-ready]
 
 permissions:
   contents: write

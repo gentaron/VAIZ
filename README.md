@@ -5,6 +5,10 @@ Linear から企画を自動で取得し、テキスト→画像→音声→動�
 ## アーキテクチャ
 
 ```
+Genesis Vault (gentaron/genesisvault)
+  │  記事を生成 → VE-009 Runa が動画ブリーフに変換
+  │  → Linear に Todo + agent-ready で起票
+  ▼
 Linear Issue (agent-ready, Todo)
   │
   ▼ plan.mjs — Issue を claim して OpenRouter 無料モデルで動画プラン JSON 生成
@@ -17,6 +21,17 @@ Linear Issue (agent-ready, Todo)
   │  out/final.mp4
   ▼ publish.mjs — GitHub Release (draft) + Linear に動画本体を添付 → In Review
 ```
+
+Issue の供給元は 2 つあり、VAIZ から見ると区別がない。
+
+| 供給元 | 起票 | 頻度 |
+|--------|------|------|
+| Genesis Vault の日次パイプライン | VE-009 Runa が公開記事から自動生成 | 毎日 11:30 UTC 前後 |
+| 人間 | Linear で直接書く（GEN-6 / GEN-7 がその例） | 随時 |
+
+どちらも「Todo + `agent-ready` + GEN-6/GEN-7 と同じ見出し構成」という
+1 つの契約を満たしていればよく、`plan.mjs` は本文をそのまま企画素材として読む。
+上流を増やしても VAIZ 側の変更は要らない。
 
 ## 生成物の受け取り先
 
@@ -144,6 +159,10 @@ bun run video:publish   # → GitHub Release (draft)
 
 - **cron**: 毎日 22:00 UTC 自動起動
 - **手動**: Actions タブ > VAIZ Video Loop > Run workflow
+- **repository_dispatch (`video-brief-ready`)**: Genesis Vault がブリーフを
+  Linear に積んだ直後に叩いてくる。上流に `VAIZ_DISPATCH_TOKEN`（このリポジトリへの
+  `contents: write` を持つ PAT）が設定されていなければ飛んでこないだけで、
+  同じ Issue を cron が拾う。**待ち時間を縮めるためのものであって、経路の前提ではない。**
 - concurrency グループで多重起動を防止（`cancel-in-progress: false` — レンダリング中の実行は殺さない）
 - どのステップで失敗しても `out/` を artifact に保存
 
