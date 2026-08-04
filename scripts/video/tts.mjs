@@ -103,7 +103,10 @@ async function main() {
   console.log('Timing saved to out/timing.json');
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+// エントリポイントとして実行されたときだけ音声合成を走らせる。
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

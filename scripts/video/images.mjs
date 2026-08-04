@@ -163,7 +163,14 @@ async function main() {
   console.log(`Done. ${paths.length} images in out/img/`);
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+// エントリポイントとして実行されたときだけパイプラインを走らせる。
+// import しただけで Cloudflare を叩き始めないようにするため
+// (plan.mjs が既に採っている形に揃えてある)。
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}
+
+export { extensionFor, isRetryable };
