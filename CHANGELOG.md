@@ -23,6 +23,31 @@
 - `dependabot.yml` — npm と github-actions を週次で更新。
 - CodeQL ワークフロー — push / PR / 週次で JavaScript を静的解析。
 
+### Added (追補)
+
+- **型チェックを導入した (`jsconfig.json` + `checkJs`)。** VAIZ にはこれまで型検査が
+  一切なく、型の間違いは実行するまで分からなかった。TypeScript へは移していない —
+  スクリプトは Bun から直接実行されるので、ビルド段を増やすとパイプラインの
+  壊れどころが増えるだけ。JSDoc ベースの検査だけを掛けており、
+  **実行されるコードは 1 バイトも変わらない**。`bun run typecheck` / CI に追加。
+
+- **外部 API の応答形を JSDoc の typedef として明文化した。** これまで
+  `await res.json()` の戻りは全て型なし (`unknown`) のまま各所へ流れていた。
+  Linear GraphQL の封筒、OpenRouter のモデル一覧とチャット応答
+  （モデル側エラーが HTTP 200 + `error` で返る件を含む）、
+  Cloudflare Workers AI の画像/テキスト応答、GitHub の Release とアセット。
+  パイプラインが外部サービスの何に依存しているかが型として残る。
+
+### Fixed (追補)
+
+- `images.mjs` の `err.status` — 素の `Error` に無いプロパティを生やしていた。
+  `HttpError` (`Error & { status?: number }`) として明示。
+  `isRetryable` の引数も、status を持つ HTTP 失敗と持たない fetch レベルの
+  ネットワーク断の union として正確に型付けした。
+- `plan.mjs` の `new Date(a) - new Date(b)` を `.getTime()` 差分に変更。
+  実行時の挙動は同じ（`Date` は算術で `valueOf()` に落ちる）だが、
+  型としては不正な演算だった。
+
 ### Changed
 
 - `images.mjs` / `render.mjs` / `tts.mjs` / `publish.mjs` / `notify-failure.mjs` の

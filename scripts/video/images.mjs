@@ -16,6 +16,18 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * HTTP ステータスを載せて投げ直すためのエラー。
+ * 素の Error に status は無いので、明示的に交差型で表す。
+ * @typedef {Error & { status?: number }} HttpError
+ */
+
+/**
+ * Cloudflare Workers AI (flux-1-schnell) の画像生成応答。
+ * 実際にはこれ以外のフィールドも返るが、依存しているのは image だけ。
+ * @typedef {{ result?: { image?: string } }} CfImageResponse
+ */
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const OUT_DIR = path.join(ROOT_DIR, 'out');
@@ -52,6 +64,7 @@ async function generateImage(prompt) {
 
   if (!res.ok) {
     const body = await res.text();
+    /** @type {HttpError} */
     const err = new Error(`CF Workers AI ${res.status}: ${body.substring(0, 300)}`);
     err.status = res.status;
     throw err;
@@ -64,7 +77,7 @@ async function generateImage(prompt) {
     return Buffer.from(await res.arrayBuffer());
   }
 
-  const json = await res.json();
+  const json = /** @type {CfImageResponse} */ (await res.json());
   if (json.result?.image) return Buffer.from(json.result.image, 'base64');
 
   throw new Error(
@@ -94,6 +107,18 @@ async function existingImage(i) {
   return null;
 }
 
+/**
+ * 再試行してよい失敗か。429 (レート制限) と 5xx (サーバー側) は再試行し、
+ * status を持たない fetch レベルのネットワークエラーも再試行する。
+ * 4xx はリクエストが直らないので再試行しない（無料枠を溶かさないため）。
+ *
+ * throw されうる値は 2 種類ある: status を載せた HttpError (HTTP 失敗) と、
+ * status を持たない素の Error (fetch レベルのネットワーク断)。
+ * どちらも受けられるよう union で取る。
+ *
+ * @param {HttpError | { status?: number }} err
+ * @returns {boolean}
+ */
 function isRetryable(err) {
   if (err.status === 429) return true;
   if (err.status >= 500) return true;

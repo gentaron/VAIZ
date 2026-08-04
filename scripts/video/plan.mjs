@@ -70,6 +70,13 @@ const PlanSchema = z
 // ═══════════════════════════════════════════════════════════════
 // Linear GraphQL helpers
 // ═══════════════════════════════════════════════════════════════
+/**
+ * Linear GraphQL のレスポンス封筒。
+ * `data` の中身はクエリごとに変わるので、ここでは封筒だけを型にする
+ * （errors の扱いを取り違えないことが目的）。
+ * @typedef {{ data?: any, errors?: unknown }} LinearGqlResponse
+ */
+
 const LINEAR_API = 'https://api.linear.app/graphql';
 
 async function gql(query, variables = {}) {
@@ -86,7 +93,7 @@ async function gql(query, variables = {}) {
   });
 
   if (!res.ok) throw new Error(`Linear API ${res.status}: ${await res.text()}`);
-  const json = await res.json();
+  const json = /** @type {LinearGqlResponse} */ (await res.json());
   if (json.errors) throw new Error(`Linear GraphQL: ${JSON.stringify(json.errors)}`);
   return json.data;
 }
@@ -140,7 +147,7 @@ async function claimIssue() {
   );
 
   const nodes = [...issuesData.issues.nodes].sort(
-    (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   );
   if (nodes.length === 0) {
     console.log(`No "${LABEL_NAME}" issues in Todo for team ${TEAM_KEY}. Nothing to do.`);
@@ -194,6 +201,31 @@ async function releaseIssue(issue, reason) {
 // ═══════════════════════════════════════════════════════════════
 // OpenRouter — 無料モデルでプラン生成
 // ═══════════════════════════════════════════════════════════════
+/**
+ * OpenRouter のモデル一覧 1 件。価格が文字列で返ることに注意
+ * （"0" と 0 の両方があり得るので parseFloat して判定している）。
+ * @typedef {{
+ *   id: string,
+ *   pricing?: { prompt?: string, completion?: string },
+ *   architecture?: { modality?: string, output_modalities?: string[] },
+ *   context_length?: number
+ * }} OpenRouterModel
+ */
+
+/**
+ * OpenRouter のチャット応答。モデル側のエラーは HTTP 200 のまま
+ * `error` フィールドで返ってくることがあるので、それも型に含める。
+ * @typedef {{
+ *   choices?: Array<{ message?: { content?: string } }>,
+ *   error?: unknown
+ * }} OpenRouterChatResponse
+ */
+
+/**
+ * Cloudflare Workers AI (テキスト) の応答。
+ * @typedef {{ result?: { response?: string } }} CfTextResponse
+ */
+
 const SYSTEM_PROMPT = `You are a video script planner. You output ONLY valid JSON. No markdown, no preamble, no explanation.
 Generate a vertical short video plan (1080x1920) in Japanese.
 Requirements:
@@ -240,7 +272,7 @@ async function discoverFreeModels() {
   try {
     const res = await fetch('https://openrouter.ai/api/v1/models');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { data } = await res.json();
+    const { data } = /** @type {{ data: OpenRouterModel[] }} */ (await res.json());
 
     const free = data.filter((m) => {
       const p = m.pricing || {};
@@ -296,7 +328,7 @@ async function callOpenRouter(model, brief, feedback) {
     throw new Error(`OpenRouter ${res.status}: ${body.substring(0, 300)}`);
   }
 
-  const json = await res.json();
+  const json = /** @type {OpenRouterChatResponse} */ (await res.json());
   // OpenRouter はモデル側のエラーを 200 + error フィールドで返すことがある
   if (json.error) throw new Error(`OpenRouter model error: ${JSON.stringify(json.error).substring(0, 300)}`);
 
@@ -336,7 +368,7 @@ async function callWorkersAI(brief, feedback) {
     throw new Error(`Workers AI ${res.status}: ${(await res.text()).substring(0, 300)}`);
   }
 
-  const json = await res.json();
+  const json = /** @type {CfTextResponse} */ (await res.json());
   const content = json.result?.response;
   if (!content) {
     throw new Error(`Unexpected Workers AI response: ${JSON.stringify(json).substring(0, 300)}`);
