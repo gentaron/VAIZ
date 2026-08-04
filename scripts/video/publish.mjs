@@ -24,6 +24,26 @@ const LINEAR_API = 'https://api.linear.app/graphql';
 // ═══════════════════════════════════════════════════════════════
 // Linear helpers
 // ═══════════════════════════════════════════════════════════════
+/**
+ * Linear GraphQL のレスポンス封筒。data の中身はクエリごとに変わる。
+ * @typedef {{ data?: any, errors?: unknown }} LinearGqlResponse
+ */
+
+/**
+ * GitHub Release。依存しているフィールドだけを型にする。
+ * @typedef {{
+ *   id: number,
+ *   html_url: string,
+ *   upload_url: string,
+ *   tag_name: string
+ * }} GitHubRelease
+ */
+
+/**
+ * Release に添付したアセット。
+ * @typedef {{ browser_download_url: string, name: string }} GitHubReleaseAsset
+ */
+
 async function gql(query, variables = {}) {
   const key = process.env.LINEAR_API_KEY;
   if (!key) throw new Error('LINEAR_API_KEY is not set');
@@ -35,7 +55,7 @@ async function gql(query, variables = {}) {
   });
 
   if (!res.ok) throw new Error(`Linear API ${res.status}: ${await res.text()}`);
-  const json = await res.json();
+  const json = /** @type {LinearGqlResponse} */ (await res.json());
   if (json.errors) throw new Error(`Linear GraphQL: ${JSON.stringify(json.errors)}`);
   return json.data;
 }
@@ -137,7 +157,7 @@ async function createRelease(apiBase, token, baseTag, title) {
     });
 
     if (res.ok) {
-      const release = await res.json();
+      const release = /** @type {GitHubRelease} */ (await res.json());
       console.log(`Release created: ${release.html_url} (draft, tag=${tag})`);
       return release;
     }
@@ -173,7 +193,7 @@ async function uploadAsset(release, token, filePath, fileName) {
     throw new Error(`Asset upload ${res.status}: ${(await res.text()).substring(0, 400)}`);
   }
 
-  const asset = await res.json();
+  const asset = /** @type {GitHubReleaseAsset} */ (await res.json());
   console.log(`Asset uploaded: ${asset.browser_download_url}`);
   return asset;
 }

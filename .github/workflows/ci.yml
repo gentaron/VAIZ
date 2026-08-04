@@ -35,6 +35,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # JSDoc ベースの型検査 (checkJs)。実行されるコードは変わらず、
+      # 型の間違いだけが落ちる。外部 API (Linear / OpenRouter / Cloudflare /
+      # GitHub) の応答形は JSDoc の typedef が契約になっている。
+      - name: Typecheck
+        run: bun run typecheck
+
       # 各スクリプトが import しただけで走り出さないことの確認も兼ねる。
       # main() が import.meta.main で囲われていないと、ここで Linear の
       # Issue を claim しにいって落ちる。
