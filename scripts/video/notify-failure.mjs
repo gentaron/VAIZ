@@ -61,7 +61,10 @@ async function main() {
   console.log(`Linear notify (${claim.identifier}): ${res.status} ${text.substring(0, 200)}`);
 }
 
-// 通知の失敗でジョブをさらに壊さない
-main().catch((err) => {
-  console.error('Notification failed (ignored):', err.message || err);
-});
+// エントリポイントとして実行されたときだけ通知する。
+// 通知の失敗でジョブをさらに壊さない。
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Notification failed (ignored):', err.message || err);
+  });
+}

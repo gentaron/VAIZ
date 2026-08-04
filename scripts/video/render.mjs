@@ -417,7 +417,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err.message || err);
-  process.exit(1);
-});
+// エントリポイントとして実行されたときだけレンダリングを走らせる。
+// import しただけで ffmpeg を起動しないようにするため。
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Fatal:', err.message || err);
+    process.exit(1);
+  });
+}
+
+export { assTime, buildASS, buildTimeline, charWidth, escapeAssText, kenBurnsExpr, wrapJapanese };

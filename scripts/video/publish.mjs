@@ -294,7 +294,13 @@ async function main() {
   if (linearAssetUrl) console.log(`Linear asset: ${linearAssetUrl}`);
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err.message || err);
-  process.exit(1);
-});
+// エントリポイントとして実行されたときだけ公開処理を走らせる。
+// import しただけで GitHub Release を作らないようにするため。
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error('Fatal:', err.message || err);
+    process.exit(1);
+  });
+}
+
+export { ghHeaders };

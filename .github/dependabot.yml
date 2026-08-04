@@ -1,0 +1,37 @@
+# 依存の自動更新。
+#
+# VAIZ の実行時依存は zod 1 つだけだが、CI が 4 つの Secret を扱うため
+# github-actions 側の更新のほうが実質的なリスク低減になる。
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # Secret を握るワークフローが使うアクション。ここが古いと
+  # 既知の脆弱性を抱えたアクションが CI で走り続けることになる。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: chore
+      include: scope

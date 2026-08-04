@@ -155,6 +155,28 @@ bun run video:publish   # → GitHub Release (draft)
 
 `images.mjs` は生成済みの `out/img/{i}.*` を読み飛ばすので、途中で落ちても再実行で続きから走る。
 
+## テスト
+
+```bash
+bun test
+```
+
+Bun 内蔵のテストランナーを使うので **追加依存はゼロ**。対象は純粋関数だけで、
+Linear / OpenRouter / Cloudflare にも ffmpeg / edge-tts にも触らない。
+そのため CI は Secret なしで数秒で完走する。
+
+固定しているのは、壊れてもエラーにならず「微妙に違う動画」として出てくる箇所:
+
+| 対象 | 何を固定しているか |
+|---|---|
+| `render.mjs` | タイムライン計算 (0.3s の無音余白 / 0.4s の xfade)、ASS の時刻書式、`{}` `\` の無害化、日本語の禁則処理付き折り返し、Ken Burns のズーム式 |
+| `plan.mjs` | `PlanSchema` の境界 (シーン 6〜8、総尺 35〜80s、1 シーン 3〜15s)、フェンスや前置き付き応答からの JSON 抽出、モデル死活判定 |
+| `images.mjs` | マジックバイトからの拡張子判定、429/5xx の再試行判定 |
+| `publish.mjs` | GitHub API ヘッダの固定 (API バージョンの暗黙アップグレード防止) |
+
+各スクリプトの `main()` は `if (import.meta.main)` で囲ってある。テストから import しても
+パイプラインが走り出さないようにするためで、**この囲いを外すとテストが Linear の Issue を claim する**。
+
 ## GitHub Actions
 
 - **cron**: 毎日 22:00 UTC 自動起動
@@ -203,4 +225,4 @@ Release は `draft: true` で作るため、コメントに載る Download URL �
 
 ## ライセンス
 
-MIT
+[MIT](LICENSE) — 全文はリポジトリ直下の `LICENSE` を参照。

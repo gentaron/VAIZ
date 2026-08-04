@@ -497,4 +497,4 @@ if (import.meta.main) {
   });
 }
 
-export { discoverFreeModels, extractJson, PlanSchema };
+export { buildUserPrompt, discoverFreeModels, extractJson, isModelDead, PlanSchema };
