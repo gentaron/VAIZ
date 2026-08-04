@@ -45,7 +45,7 @@ jobs:
       # Kokoro は日本語非対応で使っていないので、キャッシュ対象は
       # pip の wheel だけ。ダウンロードするステップの手前に置くこと。
       - name: Restore pip cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-edge-tts-${{ runner.os }}-v1
