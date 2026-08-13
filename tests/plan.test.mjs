@@ -3,9 +3,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildUserPrompt,
   extractJson,
+  hasVideoDelivered,
   isModelDead,
+  isVideoBrief,
+  oldestFirst,
+  pickRescueTarget,
   PlanSchema,
 } from '../scripts/video/plan.mjs';
+import { DELIVERED_MARKER } from '../scripts/video/publish.mjs';
 
 // plan.mjs は「信用できない出力 (LLM) を、下流 4 段が前提にできる形に変える」段。
 // ここを通ったものは images / tts / render / publish が無検査で使うので、
@@ -172,5 +177,101 @@ describe('buildUserPrompt', () => {
     const p = buildUserPrompt('brief', 'scenes must be 6-8');
     expect(p).toContain('previous attempt was rejected');
     expect(p).toContain('scenes must be 6-8');
+  });
+});
+
+// ── 救済 claim ────────────────────────────────────────────────
+// Todo は VAIZ 専用の待ち行列ではない。上流 (Genesis Vault の linear-write) が
+// ラベル無関係に最古の Todo を持っていくので、ブリーフは In Progress /
+// In Review に取り残されうる。完了条件を「Todo に居ないこと」ではなく
+// 「動画が届いていること」に置いているのがここ。
+
+describe('isVideoBrief', () => {
+  test('VE-009 が起こしたブリーフを見分ける', () => {
+    expect(isVideoBrief('本文\n<!-- gv:source=2026-08-12-post-7hrf6p -->')).toBe(true);
+    expect(isVideoBrief('VAIZ の video-loop がこの本文をそのまま企画素材として読む。')).toBe(true);
+  });
+
+  test('人間が書いた普通の企画は動画ブリーフ扱いしない', () => {
+    // ここを緩めると、記事用の企画から勝手に動画を作り始める。
+    expect(isVideoBrief('新しい記事の企画。まだ動画にはしない。')).toBe(false);
+    expect(isVideoBrief('')).toBe(false);
+    expect(isVideoBrief(null)).toBe(false);
+    expect(isVideoBrief(undefined)).toBe(false);
+  });
+});
+
+describe('hasVideoDelivered', () => {
+  const withComments = (...bodies) => ({ comments: { nodes: bodies.map((body) => ({ body })) } });
+
+  test('publish.mjs の印があれば届いている', () => {
+    // publish.mjs 側の定数をそのまま import している。片方だけ書き換えると
+    // ここが落ちる（= 同じ Issue を毎晩作り直す事故を検知する）。
+    expect(hasVideoDelivered(withComments(`${DELIVERED_MARKER}\n動画を生成しました。`))).toBe(true);
+  });
+
+  test('印を入れる前に届けた旧いコメントも完了として扱う', () => {
+    expect(hasVideoDelivered(withComments('動画を生成しました。内容を確認してから…'))).toBe(true);
+  });
+
+  test('失敗通知や上流のコメントは完了にしない', () => {
+    expect(hasVideoDelivered(withComments('動画生成ワークフローが失敗しました。'))).toBe(false);
+    expect(hasVideoDelivered(withComments('Draft is ready for review.\n\nhttps://…/pull/233'))).toBe(
+      false,
+    );
+    expect(hasVideoDelivered(withComments())).toBe(false);
+    expect(hasVideoDelivered({})).toBe(false);
+  });
+});
+
+describe('oldestFirst', () => {
+  test('作成が古い順に並べ、元の配列を壊さない', () => {
+    // Linear の orderBy は降順固定なので、古い順はこちらで作る。
+    const nodes = [{ createdAt: '2026-08-12T00:00:00Z' }, { createdAt: '2026-08-04T00:00:00Z' }];
+    expect(oldestFirst(nodes).map((n) => n.createdAt)).toEqual([
+      '2026-08-04T00:00:00Z',
+      '2026-08-12T00:00:00Z',
+    ]);
+    expect(nodes[0].createdAt).toBe('2026-08-12T00:00:00Z');
+  });
+});
+
+describe('pickRescueTarget', () => {
+  const brief = (id, createdAt, comments = []) => ({
+    id,
+    identifier: id,
+    createdAt,
+    description: `ブリーフ本文\n<!-- gv:source=${id} -->`,
+    comments: { nodes: comments.map((body) => ({ body })) },
+  });
+
+  test('動画がまだ無いブリーフのうち最も古いものを選ぶ', () => {
+    const target = pickRescueTarget([
+      brief('GEN-17', '2026-08-12T12:06:00Z'),
+      brief('GEN-9', '2026-08-04T13:14:00Z'),
+    ]);
+    expect(target.id).toBe('GEN-9');
+  });
+
+  test('既に動画が付いたブリーフは飛ばす', () => {
+    const target = pickRescueTarget([
+      brief('GEN-8', '2026-08-03T11:03:00Z', [`${DELIVERED_MARKER}\n動画を生成しました。`]),
+      brief('GEN-9', '2026-08-04T13:14:00Z'),
+    ]);
+    expect(target.id).toBe('GEN-9');
+  });
+
+  test('ブリーフでない Issue は救済しない', () => {
+    const article = {
+      id: 'GEN-20',
+      createdAt: '2026-01-01T00:00:00Z',
+      description: '記事の企画',
+      comments: { nodes: [] },
+    };
+    expect(pickRescueTarget([article])).toBeNull();
+  });
+
+  test('候補が無ければ null（呼び出し側が「何もしない」を選べるように）', () => {
+    expect(pickRescueTarget([])).toBeNull();
   });
 });

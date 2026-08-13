@@ -1,8 +1,19 @@
 /**
  * VAIZ — Video Plan Generator
  *
- * Linear (GEN チーム) から agent-ready ラベル付き Todo Issue を 1 件 claim し、
+ * Linear (GEN チーム) から動画ブリーフを 1 件 claim し、
  * OpenRouter 無料モデルに投げて動画プラン JSON を生成する。
+ *
+ * claim の対象は 2 系統ある:
+ *   1. agent-ready ラベル付きの Todo Issue（本来の入口）
+ *   2. 「動画がまだ付いていない動画ブリーフ」の救済（下記）
+ *
+ * 2 が要る理由: Todo は VAIZ 専用の待ち行列ではない。上流の Genesis Vault にも
+ * Todo を漁るワークフロー (linear-write.yml) があり、そちらはラベルで絞らずに
+ * 「最も古い Todo」を 1 件持っていく。ブリーフが VAIZ より先にそちらへ取られると、
+ * Issue は In Progress / In Review へ移ったまま動画だけが永久に作られない。
+ * Todo に居るかどうかではなく「動画が届いているか」を完了条件にすれば、
+ * 取り合いに負けた分も次の実行で拾い直せる。
  *
  * 使い方: bun run scripts/video/plan.mjs
  * 環境変数: LINEAR_API_KEY, OPENROUTER_API_KEY
@@ -23,6 +34,20 @@ const LABEL_NAME = process.env.LINEAR_LABEL || 'agent-ready';
 const MAX_ATTEMPTS = 2; // 同一モデルでの再試行回数
 const MAX_TOTAL_CALLS = 12; // 全モデル合計の上限（無限に叩かないための保険）
 const MAX_DISCOVERED = 6; // 動的に拾う無料モデルの数
+
+// 救済対象にする state。Todo より先へ動かされてしまった Issue を拾う。
+// Backlog は入れない — あそこは「今はやらない」と人間が置いた場所で、
+// 機械が勝手に持ち出してよい棚ではない。
+const RESCUE_STATES = ['In Progress', 'In Review'];
+
+// publish.mjs が動画を届けたときに残す印。本文の頭で判定していた頃の
+// 文面も残っているので、旧いコメントも完了として認める。
+const DELIVERED_MARKER = '<!-- vaiz:video -->';
+const LEGACY_DELIVERED_PREFIX = '動画を生成しました。';
+
+// Genesis Vault の VE-009 が起こした動画ブリーフの印。
+// gv:source は自動生成分に必ず入り、後者は手で書いたブリーフ側の言い回し。
+const BRIEF_MARKERS = ['<!-- gv:source=', 'VAIZ の video-loop'];
 
 // 無料モデルのスラッグは頻繁に入れ替わり、予告なく有料化される。
 // ハードコードした一覧は必ず腐るので、実行時に OpenRouter の
@@ -98,7 +123,77 @@ async function gql(query, variables = {}) {
   return json.data;
 }
 
-/** agent-ready ラベル付きの最も古い Todo Issue を 1 件 claim して In Progress へ */
+/**
+ * claim 判定が読む部分だけを型にする。Linear の Issue そのものではなく
+ * 「この関数が触るフィールド」を書くことで、テストから最小の作り物を
+ * 渡せるようにしてある。
+ * @typedef {{ nodes?: Array<{ body?: string | null }> }} LinearComments
+ * @typedef {{
+ *   createdAt: string,
+ *   description?: string | null,
+ *   comments?: LinearComments
+ * }} BriefLike
+ *
+ * claim の対象として実際に扱う Issue（GraphQL が返す形）。
+ * @typedef {BriefLike & {
+ *   id: string,
+ *   identifier: string,
+ *   title: string,
+ *   state?: { id: string, name: string }
+ * }} ClaimableIssue
+ */
+
+/**
+ * 動画ブリーフか。上流が起こしたブリーフには必ず印が入るので、
+ * 人間が書いた普通の企画を機械が持ち出さないための境界線になる。
+ * @param {string | null | undefined} description
+ */
+function isVideoBrief(description) {
+  const text = description || '';
+  return BRIEF_MARKERS.some((m) => text.includes(m));
+}
+
+/**
+ * publish.mjs が既に動画を届けたか。
+ * state ではなくコメントで見る — state は上流にも Linear の GitHub 連携にも
+ * 書き換えられるが、このコメントを書くのは VAIZ だけだから。
+ * @param {{ comments?: LinearComments }} issue
+ */
+function hasVideoDelivered(issue) {
+  return (issue.comments?.nodes || []).some((c) => {
+    const body = c.body || '';
+    return body.includes(DELIVERED_MARKER) || body.startsWith(LEGACY_DELIVERED_PREFIX);
+  });
+}
+
+/**
+ * 作成が古い順。Linear の orderBy は降順固定なのでクライアント側で並べ替える。
+ * @template {{ createdAt: string }} T
+ * @param {T[]} nodes
+ * @returns {T[]}
+ */
+function oldestFirst(nodes) {
+  return [...nodes].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
+/**
+ * 救済候補から 1 件選ぶ。動画ブリーフで、まだ動画が届いていない最古のもの。
+ * @template {BriefLike} T
+ * @param {T[]} nodes
+ * @returns {T | null}
+ */
+function pickRescueTarget(nodes) {
+  return (
+    oldestFirst(nodes).find((i) => isVideoBrief(i.description) && !hasVideoDelivered(i)) || null
+  );
+}
+
+/**
+ * agent-ready な Issue を 1 件 claim して In Progress へ。
+ * まず Todo の最古を見て、空なら「動画が届いていないブリーフ」を救済する。
+ */
 async function claimIssue() {
   // チームのワークフロー state を取得
   const teamData = await gql(
@@ -146,15 +241,49 @@ async function claimIssue() {
     { teamId: team.id, stateId: todoState.id, labelName: LABEL_NAME },
   );
 
-  const nodes = [...issuesData.issues.nodes].sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-  );
-  if (nodes.length === 0) {
-    console.log(`No "${LABEL_NAME}" issues in Todo for team ${TEAM_KEY}. Nothing to do.`);
-    return null;
-  }
+  let issue = /** @type {ClaimableIssue | null} */ (oldestFirst(issuesData.issues.nodes)[0] || null);
+  let origin = { id: todoState.id, name: 'Todo' };
 
-  const issue = nodes[0];
+  // Todo が空でも、取り合いに負けたブリーフが先の state に残っていることがある。
+  if (!issue) {
+    console.log(`No "${LABEL_NAME}" issues in Todo for team ${TEAM_KEY}. Looking for stalled briefs...`);
+
+    const stalledData = await gql(
+      `query($teamId: ID!, $labelName: String!, $states: [String!]!) {
+        issues(
+          filter: {
+            team: { id: { eq: $teamId } }
+            state: { name: { in: $states } }
+            labels: { some: { name: { eq: $labelName } } }
+          }
+          first: 50
+          orderBy: createdAt
+        ) {
+          nodes {
+            id identifier title description createdAt
+            state { id name }
+            comments(first: 50) { nodes { body } }
+          }
+        }
+      }`,
+      { teamId: team.id, labelName: LABEL_NAME, states: RESCUE_STATES },
+    );
+
+    issue = pickRescueTarget(
+      /** @type {ClaimableIssue[]} */ (stalledData.issues.nodes),
+    );
+    if (!issue) {
+      console.log('No video brief is waiting for a video. Nothing to do.');
+      return null;
+    }
+
+    // 元居た state を覚えておく。失敗したときここへ戻す —
+    // 救済した Issue を Todo へ落とすと、上流の writer にまた食われる。
+    origin = { id: issue.state?.id || inProgressState.id, name: issue.state?.name || 'In Progress' };
+    console.log(
+      `Rescuing ${issue.identifier} from "${origin.name}" — it has no video yet.`,
+    );
+  }
 
   // In Progress へ移行
   await gql(
@@ -170,18 +299,19 @@ async function claimIssue() {
     identifier: issue.identifier,
     title: issue.title,
     description: issue.description || '',
-    todoStateId: todoState.id,
+    originStateId: origin.id,
+    originStateName: origin.name,
   };
 }
 
-/** 生成に失敗したら Todo に戻して、次回の実行で再挑戦できるようにする */
+/** 生成に失敗したら元居た state に戻して、次回の実行で再挑戦できるようにする */
 async function releaseIssue(issue, reason) {
   try {
     await gql(
       `mutation($id: String!, $stateId: String!) {
         issueUpdate(id: $id, input: { stateId: $stateId }) { success }
       }`,
-      { id: issue.id, stateId: issue.todoStateId },
+      { id: issue.id, stateId: issue.originStateId },
     );
     await gql(
       `mutation($id: String!, $body: String!) {
@@ -189,10 +319,10 @@ async function releaseIssue(issue, reason) {
       }`,
       {
         id: issue.id,
-        body: `プラン生成に失敗したため Todo に戻しました。\n\n\`\`\`\n${reason}\n\`\`\``,
+        body: `プラン生成に失敗したため ${issue.originStateName} に戻しました。\n\n\`\`\`\n${reason}\n\`\`\``,
       },
     );
-    console.log(`Released ${issue.identifier} back to Todo.`);
+    console.log(`Released ${issue.identifier} back to ${issue.originStateName}.`);
   } catch (err) {
     console.error(`Failed to release issue: ${err.message}`);
   }
@@ -529,4 +659,14 @@ if (import.meta.main) {
   });
 }
 
-export { buildUserPrompt, discoverFreeModels, extractJson, isModelDead, PlanSchema };
+export {
+  buildUserPrompt,
+  discoverFreeModels,
+  extractJson,
+  hasVideoDelivered,
+  isModelDead,
+  isVideoBrief,
+  oldestFirst,
+  pickRescueTarget,
+  PlanSchema,
+};

@@ -48,6 +48,36 @@
   実行時の挙動は同じ（`Date` は算術で `valueOf()` に落ちる）だが、
   型としては不正な演算だった。
 
+### Fixed — 動画ループが 8 日間 1 本も作っていなかった件
+
+- **cron を 22:00 UTC から 13:00 UTC に前倒しした。** Linear の Todo は VAIZ 専用の
+  待ち行列ではなく、上流 Genesis Vault の `linear-write.yml` が 21:00 UTC に
+  「最も古い Todo」をラベル無関係に 1 件持っていく。2026-08-04 にそのワークフローの
+  YAML が修復されて実際に動き出して以降、22:00 UTC に来る VAIZ は毎晩
+  「Todo に agent-ready の Issue が無い」で 30 秒で終了していた（GEN-9 〜 GEN-17 の
+  9 件が動画を作られないまま In Progress に取り残された）。ブリーフが積まれるのは
+  `daily-post` (11:30 UTC) の 30 分ほど後なので、13:00 UTC なら積まれた後・
+  取られる前に入れる。
+- **`plan.mjs` に救済 claim を足した。** 時刻をずらすだけでは「先に取ったほうが勝ち」の
+  競争でしかないので、Todo が空のときは In Progress / In Review から
+  「動画がまだ届いていない動画ブリーフ」を拾い直す。完了条件を state ではなく
+  `publish.mjs` が残すコメントに置いた — state を書き換えるのは VAIZ 以外にもいる
+  （上流のワークフロー、Linear の GitHub 連携が PR を検知して In Review → In Progress
+  に戻す）が、あのコメントを書くのは VAIZ だけだから。Backlog は対象外
+  （人間が「今はやらない」と置いた棚のため）。
+- **失敗時の戻し先を claim 元の state に変えた。** 従来は一律 Todo に戻していたが、
+  救済した Issue を Todo に落とすと上流の writer にまた食われる。
+
+### Added
+
+- `publish.mjs` の完了コメントに `<!-- vaiz:video -->` を埋めた。上の救済判定が
+  「もう動画がある Issue」を候補から外すための唯一の根拠。印を入れる前に届けた
+  Issue も拾えるよう、旧い文面 (`動画を生成しました。` で始まるコメント) も
+  完了として認める。
+- `plan.mjs` の claim 判定 (`isVideoBrief` / `hasVideoDelivered` / `oldestFirst` /
+  `pickRescueTarget`) のテスト。`DELIVERED_MARKER` は `publish.mjs` から import して
+  突き合わせているので、片方だけ書き換えると落ちる。
+
 ### Changed
 
 - `images.mjs` / `render.mjs` / `tts.mjs` / `publish.mjs` / `notify-failure.mjs` の

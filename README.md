@@ -33,6 +33,10 @@ Issue の供給元は 2 つあり、VAIZ から見ると区別がない。
 1 つの契約を満たしていればよく、`plan.mjs` は本文をそのまま企画素材として読む。
 上流を増やしても VAIZ 側の変更は要らない。
 
+手で書く場合は、本文に **「VAIZ の video-loop がこの本文をそのまま企画素材として読む」**
+の 1 行を残しておくこと。Todo から拾うだけならこの行は無くても動くが、
+Todo より先へ動かされた Issue の救済（後述）はこの印を目印にしている。
+
 ## 生成物の受け取り先
 
 | 場所 | 中身 | 備考 |
@@ -179,7 +183,7 @@ Linear / OpenRouter / Cloudflare にも ffmpeg / edge-tts にも触らない。
 
 ## GitHub Actions
 
-- **cron**: 毎日 22:00 UTC 自動起動
+- **cron**: 毎日 13:00 UTC 自動起動 (マレーシア時間 21:00 / 日本時間 22:00)
 - **手動**: Actions タブ > VAIZ Video Loop > Run workflow
 - **repository_dispatch (`video-brief-ready`)**: Genesis Vault がブリーフを
   Linear に積んだ直後に叩いてくる。上流に `VAIZ_DISPATCH_TOKEN`（このリポジトリへの
@@ -188,14 +192,44 @@ Linear / OpenRouter / Cloudflare にも ffmpeg / edge-tts にも触らない。
 - concurrency グループで多重起動を防止（`cancel-in-progress: false` — レンダリング中の実行は殺さない）
 - どのステップで失敗しても `out/` を artifact に保存
 
+### なぜ 13:00 UTC なのか（Todo は VAIZ 専用の待ち行列ではない）
+
+Linear の Todo を漁るのは VAIZ だけではない。上流 Genesis Vault の
+`linear-write.yml` が **21:00 UTC** に「最も古い Todo」を 1 件持っていく。
+そちらはラベルで絞らないので、動画ブリーフも一緒に持っていってしまう。
+
+以前 VAIZ は 22:00 UTC に走っていた。つまり毎晩、ブリーフが取られた後に
+到着して「Todo に何も無い」で終わっていた。ブリーフが積まれるのは
+`daily-post` (11:30 UTC) の 30 分ほど後なので、**13:00 UTC なら積まれた後・
+取られる前**に入れる。
+
+ただし時刻をずらしただけでは「先に取ったほうが勝ち」の競争でしかない。
+そこで `plan.mjs` は Todo が空のとき、**動画がまだ届いていない動画ブリーフ**を
+In Progress / In Review から拾い直す（下記）。
+
+### 何を「まだやっていない仕事」とみなすか
+
+| 判定 | 根拠 |
+|---|---|
+| 動画ブリーフか | 本文に `<!-- gv:source=… >` または「VAIZ の video-loop」がある |
+| 動画が届いたか | `publish.mjs` が残す `<!-- vaiz:video -->` 入りのコメントがあるか |
+
+state ではなくコメントで見るのは、state を書き換えるのが VAIZ 以外にも
+いる（上流のワークフロー、Linear の GitHub 連携）ため。このコメントを
+書くのは VAIZ だけなので、完了条件をここに置いてある。Backlog は救済対象に
+入れない — あそこは「今はやらない」と人間が置いた棚だから。
+
 ### 失敗したときの扱い
 
 | 失敗箇所 | Issue の行き先 |
 |----------|----------------|
-| プラン生成 (plan.mjs) | 自動で **Todo** に戻す + 理由をコメント。次回の cron で再挑戦 |
+| プラン生成 (plan.mjs) | 自動で **claim 前の state** に戻す + 理由をコメント。次回の cron で再挑戦 |
 | 画像 / 音声 / 描画 / 公開 | **In Progress** のまま + 実行ログをコメント |
 
-後段の失敗で Todo に戻さないのは、原因が直っていないのに毎晩リトライして無料枠を食い潰すのを避けるため。直したら手動で Run workflow する。
+Todo から拾ったものは Todo へ、In Progress / In Review から救済したものは
+そこへ戻す。救済分を一律 Todo に落とすと、上流の writer にまた食われるため。
+
+後段の失敗で戻さないのは、原因が直っていないのに毎晩リトライして無料枠を食い潰すのを避けるため。直したら手動で Run workflow する。
 
 ## 使用する無料サービス
 
