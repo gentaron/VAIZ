@@ -21,6 +21,10 @@ const OUT_DIR = path.join(ROOT_DIR, 'out');
 const TEAM_KEY = process.env.LINEAR_TEAM_KEY || 'GEN';
 const LINEAR_API = 'https://api.linear.app/graphql';
 
+// 完了の印。plan.mjs の DELIVERED_MARKER と同じ文字列でなければならない
+// （向こうはこれを見て「もう動画がある Issue」を候補から外す）。
+const DELIVERED_MARKER = '<!-- vaiz:video -->';
+
 // ═══════════════════════════════════════════════════════════════
 // Linear helpers
 // ═══════════════════════════════════════════════════════════════
@@ -287,6 +291,10 @@ async function main() {
 
   const sizeMb = ((await fs.stat(finalPath)).size / 1024 / 1024).toFixed(1);
   const comment = [
+    // plan.mjs はこの印を「動画は届いた」の唯一の根拠にする。
+    // state は上流のワークフローにも Linear の GitHub 連携にも書き換えられるが、
+    // このコメントを書くのは VAIZ だけなので、完了判定はここに置く。
+    DELIVERED_MARKER,
     '動画を生成しました。内容を確認してから公開してください。',
     '',
     `**${plan.title}**`,
@@ -323,4 +331,4 @@ if (import.meta.main) {
   });
 }
 
-export { ghHeaders };
+export { DELIVERED_MARKER, ghHeaders };
