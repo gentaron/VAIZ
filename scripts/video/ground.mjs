@@ -29,20 +29,31 @@ export function terms(text) {
   return out;
 }
 
-/** ブリーフと重なる語の数で並べる。ネットワークの検証済み・観測値を少しだけ優先する。 */
-export function rankFacts(brief, docs, { limit = MAX_FACTS, minOverlap = 3 } = {}) {
+/**
+ * ブリーフと重なる語で並べる。どこにでも出る語（"code", "ai" など）は IDF で軽くし、
+ * 珍しい語の重なりだけが効くようにする。ネットワークの検証済み・観測値を少しだけ優先する。
+ */
+export function rankFacts(brief, docs, { limit = MAX_FACTS, minScore = 2.5, minTerms = 1 } = {}) {
   const want = terms(brief);
+  const usable = docs.filter((d) => d?.url && /^https:\/\//.test(d.url) && d.title);
+  const bags = usable.map((d) => terms(`${d.title} ${d.titleJa || ''} ${d.summary || ''}`));
+  const df = new Map();
+  for (const bag of bags) for (const t of bag) if (want.has(t)) df.set(t, (df.get(t) || 0) + 1);
+  const n = Math.max(usable.length, 1);
   const scored = [];
-  for (const d of docs) {
-    if (!d?.url || !/^https:\/\//.test(d.url) || !d.title) continue;
-    const have = terms(`${d.title} ${d.titleJa || ''} ${d.summary || ''}`);
-    let overlap = 0;
-    for (const t of have) if (want.has(t)) overlap++;
-    if (overlap < minOverlap) continue;
+  usable.forEach((d, i) => {
+    let score = 0;
+    let hits = 0;
+    for (const t of bags[i]) {
+      if (!want.has(t)) continue;
+      hits++;
+      score += Math.log(1 + n / df.get(t));
+    }
+    if (hits < minTerms || score < minScore) return;
     const tags = d.tags || [];
     const trust = tags.includes('verified') ? 1.5 : tags.includes('observed') ? 1.2 : 1;
-    scored.push({ d, score: overlap * trust });
-  }
+    scored.push({ d, score: score * trust });
+  });
   scored.sort((a, b) => b.score - a.score || String(b.d.date).localeCompare(String(a.d.date)));
   const seen = new Set();
   return scored
