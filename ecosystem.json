@@ -12,7 +12,9 @@
   ],
   "consumes": [
     "blog",
-    "kb"
+    "kb",
+    "research",
+    "market"
   ],
   "upstream": [
     {
@@ -36,6 +38,20 @@
         "blog"
       ],
       "url": "https://github.com/gentaron/Gentarog"
+    },
+    {
+      "repo": "Mathematical-Physics-Lab-",
+      "flows": [
+        "research"
+      ],
+      "url": "https://github.com/gentaron/Mathematical-Physics-Lab-"
+    },
+    {
+      "repo": "QAIZ",
+      "flows": [
+        "market"
+      ],
+      "url": "https://github.com/gentaron/QAIZ"
     }
   ],
   "downstream": [],

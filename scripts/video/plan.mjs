@@ -22,6 +22,7 @@
  */
 
 import { z } from 'zod';
+import { groundBrief } from './ground.mjs';
 import fs from 'node:fs/promises';
 import { appendFileSync } from 'node:fs';
 import path from 'node:path';
@@ -619,7 +620,11 @@ async function main() {
   // Step 2: OpenRouter でプラン生成（Zod 検証、モデル間フォールバック）
   let plan;
   try {
-    plan = await generatePlan(issue.description || issue.title);
+    // ナレッジベースから裏取りを足す（数理物理ラボ・QAIZ の結果も入っている）。取れなければ素のまま
+    const grounded = await groundBrief(issue.description || issue.title);
+    if (grounded.facts.length) console.log(`Grounded with ${grounded.facts.length} KB facts`);
+    plan = await generatePlan(grounded.brief);
+    if (grounded.facts.length) plan = { ...plan, _sources: grounded.facts.map((f) => f.url) };
   } catch (err) {
     console.error(err.message);
     await releaseIssue(issue, err.message);

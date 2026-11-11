@@ -7,7 +7,7 @@
 ## エコシステム（このリポジトリの外側）
 
 - 役割: 完全無料の動画生成ループ。企画 → 画像 → 音声 → 動画（発信パイプライン）
-- 上流（ここが受け取るもの）: infocollect（記事・ナレッジベース）、genesisvault（記事）、Gentarog（記事）
+- 上流（ここが受け取るもの）: infocollect（記事・ナレッジベース）、genesisvault（記事）、Gentarog（記事）、Mathematical-Physics-Lab-（研究ノート）、QAIZ（相場の地形）
 - 下流（ここが渡すもの）: なし
 - 渡しているもの（produces）の形を変えるときは、下流のリポジトリ名をコミットメッセージに書き、壊さない移行にする。
 - 調べ物は MCP の `infocollect-kb` を先に使う（`kb_search` / `kb_context`。毎日の AI 情報・論文・リリース・過去記事・全リポジトリの役割が入っている）。出典の URL を必ず添える。

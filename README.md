@@ -267,7 +267,7 @@ Release は `draft: true` で作るため、コメントに載る Download URL �
 
 gentaron のリポジトリ群のうち **発信パイプライン** の一つ。完全無料の動画生成ループ。企画 → 画像 → 音声 → 動画。
 
-- **受け取る**: [infocollect](https://github.com/gentaron/infocollect)（記事・ナレッジベース）、[genesisvault](https://github.com/gentaron/genesisvault)（記事）、[Gentarog](https://github.com/gentaron/Gentarog)（記事）
+- **受け取る**: [infocollect](https://github.com/gentaron/infocollect)（記事・ナレッジベース）、[genesisvault](https://github.com/gentaron/genesisvault)（記事）、[Gentarog](https://github.com/gentaron/Gentarog)（記事）、[Mathematical-Physics-Lab-](https://github.com/gentaron/Mathematical-Physics-Lab-)（研究ノート）、[QAIZ](https://github.com/gentaron/QAIZ)（相場の地形）
 - **同じ島**: [IDEAZ](https://github.com/gentaron/IDEAZ)、[SAIZ](https://github.com/gentaron/SAIZ)、[genimage](https://github.com/gentaron/genimage)、[seo](https://github.com/gentaron/seo)
 
 全体の地図 → [ecosystem](https://github.com/gentaron/infocollect/blob/HEAD/ecosystem/README.md)
