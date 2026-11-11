@@ -1,0 +1,75 @@
+{
+  "$schema": "https://raw.githubusercontent.com/gentaron/infocollect/HEAD/ecosystem/schema.json",
+  "schema": 1,
+  "name": "VAIZ",
+  "group": "pipeline",
+  "groupLabel": "発信パイプライン",
+  "status": "active",
+  "role": "完全無料の動画生成ループ。企画 → 画像 → 音声 → 動画",
+  "stack": "Bun",
+  "produces": [
+    "video"
+  ],
+  "consumes": [
+    "blog",
+    "kb",
+    "research",
+    "market"
+  ],
+  "upstream": [
+    {
+      "repo": "infocollect",
+      "flows": [
+        "blog",
+        "kb"
+      ],
+      "url": "https://github.com/gentaron/infocollect"
+    },
+    {
+      "repo": "genesisvault",
+      "flows": [
+        "blog"
+      ],
+      "url": "https://github.com/gentaron/genesisvault"
+    },
+    {
+      "repo": "Gentarog",
+      "flows": [
+        "blog"
+      ],
+      "url": "https://github.com/gentaron/Gentarog"
+    },
+    {
+      "repo": "Mathematical-Physics-Lab-",
+      "flows": [
+        "research"
+      ],
+      "url": "https://github.com/gentaron/Mathematical-Physics-Lab-"
+    },
+    {
+      "repo": "QAIZ",
+      "flows": [
+        "market"
+      ],
+      "url": "https://github.com/gentaron/QAIZ"
+    }
+  ],
+  "downstream": [],
+  "siblings": [
+    "IDEAZ",
+    "genesisvault",
+    "Gentarog",
+    "SAIZ",
+    "genimage",
+    "seo"
+  ],
+  "hub": {
+    "repo": "https://github.com/gentaron/infocollect",
+    "map": "https://github.com/gentaron/infocollect/blob/HEAD/ecosystem/README.md",
+    "kb": "https://raw.githubusercontent.com/gentaron/infocollect/HEAD/docs/kb",
+    "mcp": [
+      "infocollect-kb",
+      "forge"
+    ]
+  }
+}
