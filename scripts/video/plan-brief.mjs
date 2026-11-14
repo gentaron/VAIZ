@@ -20,6 +20,7 @@ async function main() {
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   if (existing.length) throw new Error('out/ already has files; move or clear the previous draft before starting another');
   const grounded = await groundBrief(formatCreativeBrief(brief));
+  console.log(`KB source candidates added: ${grounded.facts.length}`);
   const plan = await generatePlan(grounded.brief);
   const output = {
     ...plan,
