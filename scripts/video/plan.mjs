@@ -674,4 +674,5 @@ export {
   oldestFirst,
   pickRescueTarget,
   PlanSchema,
+  generatePlan,
 };
