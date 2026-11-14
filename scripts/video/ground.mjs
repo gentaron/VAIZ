@@ -20,7 +20,8 @@ const TIMEOUT_MS = 8000;
 
 /** 日本語は文字 2-gram、英数字は単語で切る。ストップワード無しでも十分に効く粒度。 */
 export function terms(text) {
-  const s = String(text || '').toLowerCase();
+  // URL の共通部分を検索語にしない。パス（owner/repo）は残す。
+  const s = String(text || '').toLowerCase().replace(/https?:\/\/[^/\s]+\/?/g, ' ');
   const out = new Set();
   for (const w of s.match(/[a-z0-9][a-z0-9.+-]{1,}/g) || []) out.add(w);
   for (const run of s.match(/[぀-ヿ㐀-鿿]+/g) || []) {
