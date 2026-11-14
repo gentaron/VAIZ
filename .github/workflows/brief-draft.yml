@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/brief-draft.yml'
-      - 'briefs/example.json'
+      - 'briefs/from-infocollect.json'
   workflow_dispatch:
     inputs:
       brief_path:
@@ -33,7 +33,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Validate brief path
         env:
-          BRIEF_PATH: ${{ inputs.brief_path || 'briefs/example.json' }}
+          BRIEF_PATH: ${{ inputs.brief_path || 'briefs/from-infocollect.json' }}
         run: |
           if [[ ! "$BRIEF_PATH" =~ ^briefs/[A-Za-z0-9._-]+\.json$ ]]; then
             echo "Use a JSON file directly inside briefs/" >&2
@@ -50,7 +50,7 @@ jobs:
           sudo apt-get install -y -qq ffmpeg fonts-noto-cjk
       - name: Generate plan from reviewed brief
         env:
-          BRIEF_PATH: ${{ inputs.brief_path || 'briefs/example.json' }}
+          BRIEF_PATH: ${{ inputs.brief_path || 'briefs/from-infocollect.json' }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

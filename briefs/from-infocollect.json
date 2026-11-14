@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "type": "creative-brief",
+  "status": "draft",
+  "source": {
+    "app": "infocollect",
+    "digestGeneratedAt": "2026-11-14T07:19:50.502Z",
+    "kind": "tool",
+    "rank": 2,
+    "url": "https://github.com/vercel-labs/ui",
+    "publishedAt": null
+  },
+  "brief": {
+    "title": "vercel-labs/ui：エージェント向けUI部品を調べる",
+    "context": "InfoCollectの2026-11-14収集で、vercel-labs/uiが「エージェントが次世代のユーザーインターフェースを構築するための振る舞いのライブラリ」として紹介された。機能や対応環境は元のGitHubリポジトリで確認してから説明する。",
+    "goal": "出典を示しながら、このプロジェクトの目的と、個人開発者が検証すべき点を短い動画で伝える",
+    "audience": "AIを使ってアプリを作る個人開発者",
+    "keyPoints": [
+      "InfoCollectの収集結果からvercel-labs/uiを選んだことを明示する",
+      "公式リポジトリの説明に基づき、UIの振る舞いを扱うライブラリとして紹介する",
+      "利用前にREADME、導入手順、ライセンス、更新状況を元ページで確認する"
+    ],
+    "references": [
+      "https://github.com/vercel-labs/ui"
+    ]
+  }
+}
