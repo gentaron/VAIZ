@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "type": "creative-brief",
+  "status": "draft",
+  "source": {
+    "app": "infocollect",
+    "digestGeneratedAt": null,
+    "kind": "manual",
+    "rank": 1,
+    "url": "https://github.com/gentaron/infocollect",
+    "publishedAt": null
+  },
+  "brief": {
+    "title": "InfoCollectで調査から制作へ",
+    "context": "InfoCollectはAIツールとニュースを収集し、出典リンク付きのダイジェストを公開するPWAです。",
+    "goal": "収集した情報を出典確認と企画編集を経て制作に渡す流れを説明する",
+    "audience": "個人開発者",
+    "keyPoints": [
+      "収集結果には元のURLを残す",
+      "企画の目的と対象者を人が確認する",
+      "下書き動画を確認してから公開を決める"
+    ],
+    "references": [
+      "https://github.com/gentaron/infocollect"
+    ]
+  }
+}
