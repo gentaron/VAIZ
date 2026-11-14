@@ -38,6 +38,7 @@ describe('groundBrief', () => {
     const out = await groundBrief('コスモヘドロンの面の数を紹介', { kbUrl: dir, enabled: true });
     expect(out.facts.length).toBe(1);
     expect(out.brief).toContain('参考（ナレッジベース）');
+    expect(out.brief).toContain('未検証');
     expect(out.brief).toContain('https://github.com/x/lab');
   });
 
