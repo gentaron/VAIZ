@@ -159,6 +159,19 @@ bun run video:publish   # → GitHub Release (draft)
 
 `images.mjs` は生成済みの `out/img/{i}.*` を読み飛ばすので、途中で落ちても再実行で続きから走る。
 
+## 企画ファイルから下書き動画を作る（Linear不要）
+
+`infocollect`の`creative-brief` JSONを手元に保存し、`brief.goal`と`brief.audience`を埋めてから実行する。出典URLはHTTPSで指定する。**この経路は公開しない**。`out/`は実行前に空にしておく（既存ファイルがあればコマンドが停止する）。
+
+```bash
+bun run video:plan:brief brief.json  # out/plan.json。OpenRouterまたはCloudflareのテキストモデルを使う
+bun run video:images                 # 画像生成にはCloudflareの認証情報が必要
+bun run video:tts
+bun run video:render                 # out/final.mp4
+```
+
+`video:publish`はLinear Issueがない下書きには使えない。完成した`out/final.mp4`を確認してから、別途公開方法を決める。モデル生成前にJSON形式・目的・対象視聴者を検証し、出典URLを`plan.json`に残す。既存の定時実行・Linear経路はそのまま使える。
+
 ## テスト
 
 ```bash
