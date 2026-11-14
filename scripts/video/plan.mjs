@@ -402,7 +402,7 @@ function extractJson(content) {
  */
 async function discoverFreeModels() {
   try {
-    const res = await fetch('https://openrouter.ai/api/v1/models');
+    const res = await fetch('https://openrouter.ai/api/v1/models', { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { data } = /** @type {{ data: OpenRouterModel[] }} */ (await res.json());
 
@@ -437,6 +437,7 @@ async function callOpenRouter(model, brief, feedback) {
   if (!key) throw new Error('OPENROUTER_API_KEY is not set');
 
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    signal: AbortSignal.timeout(45_000),
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -483,6 +484,7 @@ async function callWorkersAI(brief, feedback) {
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${CF_TEXT_MODEL}`,
     {
+      signal: AbortSignal.timeout(45_000),
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
