@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { formatCreativeBrief, parseCreativeBrief } from './brief.mjs';
+import { formatCreativeBrief, parseCreativeBrief } from '../scripts/video/brief.mjs';
 
 const sample = {
   schemaVersion: 1,
