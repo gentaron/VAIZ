@@ -11,7 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 async function main() {
   const file = process.argv[2];
   if (!file || process.argv.length !== 3) {
-    throw new Error('Usage: bun run video:plan:brief -- path/to/brief.json');
+    throw new Error('Usage: bun run video:plan:brief path/to/brief.json');
   }
   const brief = parseCreativeBrief(JSON.parse(await fs.readFile(path.resolve(file), 'utf8')));
   const outDir = path.join(root, 'out');
