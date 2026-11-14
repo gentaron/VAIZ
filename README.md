@@ -174,6 +174,8 @@ bun run video:render                 # out/final.mp4
 
 レビューした`creative-brief` JSONをこの公開リポジトリの`briefs/名前.json`としてコミットし、Actionsの**VAIZ Brief Draft → Run workflow**で`brief_path`にそのパスを入れる。画像生成・音声合成・ffmpegはGitHubのランナーで動き、結果は実行ページの`brief-draft-*` Artifactから取得する。このワークフローはReleaseの作成、Linearへの送信、SNS公開を行わない。
 
+初回の動作確認には同梱の`briefs/example.json`を`brief_path`に指定できる。実際の企画では別名のファイルを追加する。
+
 `briefs/`のファイルは公開されるため、個人情報や秘密値は入れない。OpenRouterとCloudflareのキーはリポジトリのActions Secretsから読む。書き出した直後のInfoCollect JSONは`goal`と`audience`が空なので、編集してから実行する。
 
 `video:publish`はLinear Issueがない下書きには使えない。完成した`out/final.mp4`を確認してから、別途公開方法を決める。モデル生成前にJSON形式・目的・対象視聴者を検証し、出典URLを`plan.json`に残す。既存の定時実行・Linear経路はそのまま使える。
