@@ -5,3 +5,8 @@ out/
 !scripts/video/tts_helper.py
 
 __pycache__/
+
+# secrets
+.env
+.env.*
+!.env.example
