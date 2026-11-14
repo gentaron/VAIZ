@@ -24,6 +24,15 @@ describe('rankFacts', () => {
     expect(rankFacts('猫と散歩', docs)).toEqual([]);
   });
 
+  test('URLのホスト名だけで無関係な資料を拾わない', () => {
+    const candidates = [
+      { title: 'vercel-labs/ui', url: 'https://github.com/vercel-labs/ui', summary: 'UI behaviors' },
+      { title: '別の資料', url: 'https://example.com/unrelated', summary: 'https://github.com/other/tool' },
+    ];
+    const facts = rankFacts('紹介: https://github.com/vercel-labs/ui', candidates, { minScore: 1 });
+    expect(facts.map((fact) => fact.url)).toEqual(['https://github.com/vercel-labs/ui']);
+  });
+
   test('日本語は 2-gram、英数字は単語', () => {
     expect([...terms('AI動画 GPT-5')].sort()).toEqual(['ai', 'gpt-5', '動画'].sort());
   });
