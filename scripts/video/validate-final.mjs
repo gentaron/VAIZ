@@ -11,7 +11,7 @@ const defaultPath=path.join(root,'out/final.mp4');
 
 export function rate(value) {
   if (typeof value !== 'string') return NaN;
-  const [n,d='1']=value.split('/').map(Number);
+  const [n,d=1]=value.split('/').map(Number);
   return d > 0 ? n/d : NaN;
 }
 
