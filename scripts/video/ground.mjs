@@ -13,6 +13,7 @@
  */
 
 import fs from 'node:fs/promises';
+import { isPublicHttpsSource } from './source-url.mjs';
 
 export const KB_URL = process.env.VAIZ_KB_URL || 'https://raw.githubusercontent.com/gentaron/infocollect/HEAD/docs/kb';
 const MAX_FACTS = 4;
@@ -36,7 +37,7 @@ export function terms(text) {
  */
 export function rankFacts(brief, docs, { limit = MAX_FACTS, minScore = 2.5, minTerms = 1 } = {}) {
   const want = terms(brief);
-  const usable = docs.filter((d) => d?.url && /^https:\/\//.test(d.url) && d.title);
+  const usable = docs.filter((d) => d?.url && isPublicHttpsSource(d.url) && d.title);
   const bags = usable.map((d) => terms(`${d.title} ${d.titleJa || ''} ${d.summary || ''}`));
   const df = new Map();
   for (const bag of bags) for (const t of bag) if (want.has(t)) df.set(t, (df.get(t) || 0) + 1);
