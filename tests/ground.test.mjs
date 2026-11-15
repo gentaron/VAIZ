@@ -20,6 +20,14 @@ describe('rankFacts', () => {
     expect(facts.map((f) => f.url)).toEqual(['https://github.com/x/lab']);
   });
 
+  test('内部ネットワークのリンクは候補にしない', () => {
+    const facts = rankFacts('コスモヘドロン', [{
+      title: 'コスモヘドロンの計算', url: 'https://127.0.0.1/secret',
+      summary: 'コスモヘドロン'
+    }], { minScore: 0 });
+    expect(facts).toEqual([]);
+  });
+
   test('重なりが薄ければ何も足さない', () => {
     expect(rankFacts('猫と散歩', docs)).toEqual([]);
   });
