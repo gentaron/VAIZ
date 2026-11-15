@@ -68,6 +68,8 @@ jobs:
         run: bun run video:tts
       - name: Render video
         run: bun run video:render
+      - name: Validate offline final-video contract
+        run: bun run video:validate
       - name: Save draft video and logs
         if: always()
         uses: actions/upload-artifact@v4
