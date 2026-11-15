@@ -1,0 +1,13 @@
+# Free OSS vulnerability detection; runs only for public repository PRs.
+# It reads lockfiles and source metadata. No model API, cloud billing key or deployment.
+name: OSV dependency security (free)
+on:
+  pull_request:
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+jobs:
+  dependencies:
+    if: github.event.repository.private == false
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@v2.7.1
