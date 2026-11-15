@@ -1,3 +1,4 @@
+import { isPublicHttpsSource } from './source-url.mjs';
 /** Parse the shared InfoCollect brief before any network request or file write. */
 export function parseCreativeBrief(value) {
   if (!value || typeof value !== 'object' || value.schemaVersion !== 1 || value.type !== 'creative-brief') {
@@ -23,7 +24,7 @@ export function parseCreativeBrief(value) {
   }
   const keyPoints = details.keyPoints.map((item) => String(item).trim()).filter(Boolean).slice(0, 20);
   const references = [...new Set([source.url, ...details.references])];
-  if (!references.length || references.some((url) => typeof url !== 'string' || !/^https:\/\/[^\s]+$/.test(url))) {
+  if (!references.length || references.some((url) => !isPublicHttpsSource(url))) {
     throw new Error('All source URLs must be HTTPS');
   }
   return { title, context, goal, audience, keyPoints, references };
