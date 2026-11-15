@@ -14,6 +14,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectFinal } from './validate-final.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.join(__dirname, '..', '..');
@@ -257,6 +258,9 @@ async function main() {
   } catch {
     throw new Error('final.mp4 not found. Run render.mjs first.');
   }
+
+  // Fail before any API call or draft Release creation if the render violates the contract.
+  inspectFinal(finalPath);
 
   const issueId = plan._issue?.id;
   const identifier = plan._issue?.identifier || 'unknown';
