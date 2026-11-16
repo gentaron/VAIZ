@@ -4,6 +4,7 @@ import {
   assTime,
   buildASS,
   buildTimeline,
+  finalVideoFilter,
   charWidth,
   escapeAssText,
   kenBurnsExpr,
@@ -255,5 +256,15 @@ describe('buildASS', () => {
     // \N (自前の改行) 以外の制御シーケンスが残っていないこと
     expect(dialogue.replace(/\\N/g, '')).not.toContain('\\');
     expect(dialogue).not.toContain('{');
+  });
+});
+
+
+describe('final export color range', () => {
+  test('converts inherited full-range JPEG levels to limited H.264 video', () => {
+    expect(finalVideoFilter()).toBe(
+      '[0:v]ass=subtitles.ass,scale=in_range=auto:out_range=tv,format=yuv420p[v]',
+    );
+    expect(finalVideoFilter('subtitles.ass')).toContain('out_range=tv');
   });
 });

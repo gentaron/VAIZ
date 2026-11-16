@@ -27,6 +27,7 @@ export function checkFinalMetadata(info, bytes, {minSeconds=10,maxSeconds=240}={
   if(video) {
     if(video.codec_name!=='h264') errors.push('video codec must be H.264');
     if(video.pix_fmt!=='yuv420p') errors.push('pixel format must be yuv420p');
+    if(video.color_range==='pc') errors.push('color range must be limited (tv)');
     if(video.width!==1080 || video.height!==1920) errors.push('output must be 1080x1920 portrait');
     const fps=rate(video.avg_frame_rate||video.r_frame_rate);
     if(!Number.isFinite(fps)||Math.abs(fps-30)>0.1) errors.push('frame rate must be 30fps');

@@ -297,6 +297,12 @@ function concatWithXfade(clipPaths, timeline) {
   return currentPath;
 }
 
+// H.264 social-video output must be limited range, even when JPEG sources carry
+// a full-range (pc) flag. -pix_fmt alone does not convert color levels.
+export function finalVideoFilter(assName = 'subtitles.ass') {
+  return `[0:v]ass=${assName},scale=in_range=auto:out_range=tv,format=yuv420p[v]`;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // 音声トラック配置 + 字幕焼き込み → final.mp4
 // ═══════════════════════════════════════════════════════════════
@@ -310,7 +316,7 @@ async function mergeAudioAndSubtitles(videoPath, plan, timeline) {
   // 各 WAV を timeline の位置まで adelay でずらし、amix で 1 本にまとめる。
   // 重なりはないので normalize=0 で原音量を保つ。
   const inputs = ['-i', videoPath];
-  const chains = [`[0:v]ass=${assName}[v]`];
+  const chains = [finalVideoFilter(assName)];
   const labels = [];
 
   timeline.scenes.forEach((s, i) => {
@@ -339,6 +345,7 @@ async function mergeAudioAndSubtitles(videoPath, plan, timeline) {
       '-preset', 'medium',
       '-crf', '23',
       '-pix_fmt', 'yuv420p',
+      '-color_range', 'tv', // limited range; avoid yuvj420p on JPEG-derived scenes
       '-c:a', 'aac',
       '-b:a', '128k',
       '-ar', '48000',
