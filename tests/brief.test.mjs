@@ -30,6 +30,8 @@ describe('creative brief input', () => {
   test('rejects unsupported schemas and unsafe URLs', () => {
     expect(() => parseCreativeBrief({ ...sample, schemaVersion: 2 })).toThrow(/schemaVersion 1/);
     expect(() => parseCreativeBrief({ ...sample, source: { url: 'http://example.org/story' } })).toThrow(/HTTPS/);
+    expect(() => parseCreativeBrief({ ...sample, source: { url: 'https://user:password@example.org/story' } })).toThrow(/HTTPS/);
+    expect(() => parseCreativeBrief({ ...sample, source: { url: 'https://127.0.0.1/story' } })).toThrow(/HTTPS/);
   });
 });
 
