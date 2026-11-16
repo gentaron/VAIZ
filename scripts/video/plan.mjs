@@ -652,7 +652,7 @@ if (import.meta.main) {
 
 export {
   buildUserPrompt,
-  discoverFreeModels,
+  discoverModelCatalog,
   extractJson,
   hasVideoDelivered,
   isModelDead,
