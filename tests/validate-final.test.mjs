@@ -3,7 +3,7 @@ import {checkFinalMetadata,rate} from '../scripts/video/validate-final.mjs';
 const valid={
   format:{duration:'49.82'},
   streams:[
-    {codec_type:'video',codec_name:'h264',pix_fmt:'yuv420p',width:1080,height:1920,avg_frame_rate:'30/1'},
+    {codec_type:'video',codec_name:'h264',pix_fmt:'yuv420p',color_range:'tv',width:1080,height:1920,avg_frame_rate:'30/1'},
     {codec_type:'audio',codec_name:'aac',sample_rate:'24000'}
   ],
 };
@@ -18,6 +18,8 @@ describe('offline media release evidence gate',()=>{
       {...valid,streams:[{...valid.streams[0],width:1920,height:1080},valid.streams[1]]},
       {...valid,streams:[{...valid.streams[0],codec_name:'hevc'},valid.streams[1]]},
       {...valid,streams:[{...valid.streams[0],pix_fmt:'yuv444p'},valid.streams[1]]},
+      {...valid,streams:[{...valid.streams[0],pix_fmt:'yuvj420p',color_range:'pc'},valid.streams[1]]},
+      {...valid,streams:[{...valid.streams[0],color_range:'pc'},valid.streams[1]]},
       {...valid,streams:[{...valid.streams[0],avg_frame_rate:'24/1'},valid.streams[1]]},
     ]) expect(checkFinalMetadata(meta,2000000).ok).toBe(false);
   });
