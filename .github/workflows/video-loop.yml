@@ -107,6 +107,10 @@ jobs:
         if: steps.plan.outputs.found == 'true'
         run: bun run video:render
 
+      - name: Validate offline final-video contract
+        if: steps.plan.outputs.found == 'true'
+        run: bun run video:validate
+
       # ── Publish ───────────────────────────────────────────
       - name: Publish to GitHub Release
         if: steps.plan.outputs.found == 'true'

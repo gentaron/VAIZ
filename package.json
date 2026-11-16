@@ -11,7 +11,8 @@
     "video:publish": "bun scripts/video/publish.mjs",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p jsconfig.json",
-    "video:plan:brief": "bun scripts/video/plan-brief.mjs"
+    "video:plan:brief": "bun scripts/video/plan-brief.mjs",
+    "video:validate": "bun scripts/video/validate-final.mjs"
   },
   "dependencies": {
     "zod": "^3.23.8"

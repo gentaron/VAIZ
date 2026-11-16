@@ -23,6 +23,7 @@
 
 import { z } from 'zod';
 import { groundBrief } from './ground.mjs';
+import { selectFreeChatCandidates, ZERO_PRICE_CEILING } from './free-models.mjs';
 import fs from 'node:fs/promises';
 import { appendFileSync } from 'node:fs';
 import path from 'node:path';
@@ -400,34 +401,14 @@ function extractJson(content) {
  * OpenRouter のモデル一覧から、prompt / completion 単価がゼロのものを拾う。
  * この endpoint は認証不要。失敗しても致命的ではないので空配列を返す。
  */
-async function discoverFreeModels() {
+async function discoverModelCatalog() {
   try {
     const res = await fetch('https://openrouter.ai/api/v1/models', { signal: AbortSignal.timeout(15_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { data } = /** @type {{ data: OpenRouterModel[] }} */ (await res.json());
-
-    const free = data.filter((m) => {
-      const p = m.pricing || {};
-      const zero = (v) => v !== undefined && parseFloat(v) === 0;
-      if (!zero(p.prompt) || !zero(p.completion)) return false;
-      // テキスト→テキストが使えるものだけ
-      const mod = m.architecture?.modality || '';
-      const outputs = m.architecture?.output_modalities;
-      if (outputs && !outputs.includes('text')) return false;
-      return mod.includes('text');
-    });
-
-    // 文脈長が長い順。プランのプロンプトは短いが、
-    // 極端に小さいモデルは JSON を守れないことが多いので目安にする。
-    const ids = free
-      .sort((a, b) => (b.context_length || 0) - (a.context_length || 0))
-      .map((m) => m.id)
-      .slice(0, MAX_DISCOVERED);
-
-    console.log(`Discovered ${free.length} free models on OpenRouter; trying: ${ids.join(', ')}`);
-    return ids;
+    const body = /** @type {{data: OpenRouterModel[]}} */ (await res.json());
+    return Array.isArray(body.data) ? body.data : [];
   } catch (err) {
-    console.warn(`Could not fetch OpenRouter model list: ${err.message}`);
+    console.warn(`Could not verify current free-model pricing: ${err.message}`);
     return [];
   }
 }
@@ -447,6 +428,7 @@ async function callOpenRouter(model, brief, feedback) {
     },
     body: JSON.stringify({
       model,
+      provider: ZERO_PRICE_CEILING,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(brief, feedback) },
@@ -518,11 +500,12 @@ function isModelDead(message) {
 
 /** 候補モデルを順に試して、Zod 検証を通るプランが出たら返す */
 async function generatePlan(brief) {
-  const discovered = await discoverFreeModels();
-
-  // 明示指定 → 無料オートルーター → 実行時に見つけた無料モデル
-  const candidates = [...new Set([...MANUAL_MODELS, 'openrouter/free', ...discovered])];
-  console.log(`Model candidates (${candidates.length}): ${candidates.join(', ')}`);
+  const catalog = await discoverModelCatalog();
+  const { candidates, denied, discovered } = selectFreeChatCandidates(MANUAL_MODELS, catalog, {
+    maxDiscovered: MAX_DISCOVERED,
+  });
+  if (denied.length) console.warn(`Rejected unverified or non-free models: ${denied.join(', ')}`);
+  console.log(`Verified zero-price models: ${discovered}; candidate order: ${candidates.join(', ')}`);
 
   let feedback = null;
   let lastError;
@@ -559,7 +542,7 @@ async function generatePlan(brief) {
   }
 
   // OpenRouter が全滅した場合のみ Cloudflare へ
-  if (process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN) {
+  if (process.env.VAIZ_ALLOW_CF_FALLBACK === '1' && process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN) {
     console.warn('\nAll OpenRouter candidates failed. Falling back to Cloudflare Workers AI.');
     console.warn(
       `NOTE: ${CF_TEXT_MODEL} は画像生成と同じ 1 日 10,000 neurons を消費します。`,
@@ -669,7 +652,7 @@ if (import.meta.main) {
 
 export {
   buildUserPrompt,
-  discoverFreeModels,
+  discoverModelCatalog,
   extractJson,
   hasVideoDelivered,
   isModelDead,
