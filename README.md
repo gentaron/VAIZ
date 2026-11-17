@@ -159,6 +159,17 @@ bun run video:publish   # → GitHub Release (draft)
 
 `images.mjs` は生成済みの `out/img/{i}.*` を読み飛ばすので、途中で落ちても再実行で続きから走る。
 
+### seed 多様性の評価（オフライン）
+
+蒸留モデルで起きる seed 崩壊を、生成済みフレームから確認する。seed ごとにディレクトリを分けて置き、32x32 の色ヒストグラムから seed 間の平均類似度と共分散の固有値集中度を出す。
+
+```bash
+bun run video:diversity out/diversity
+# out/diversity/<seed>/<frame>.{jpg,jpeg,png,webp}
+```
+
+ネットワーク・GPU・外部APIは使わない（画像の縮小にローカルの ffmpeg だけ使う）。崩壊の疑いがあるときは `warn` と終了コード 1 を返す。しきい値は初期値なので、実際の生成物に合わせて調整する。
+
 ## 企画ファイルから下書き動画を作る（Linear不要）
 
 `infocollect`の`creative-brief` JSONを手元に保存し、`brief.goal`と`brief.audience`を埋めてから実行する。出典URLはHTTPSで指定する。**この経路は公開しない**。`out/`は実行前に空にしておく（既存ファイルがあればコマンドが停止する）。

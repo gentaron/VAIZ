@@ -12,7 +12,8 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "video:plan:brief": "bun scripts/video/plan-brief.mjs",
-    "video:validate": "bun scripts/video/validate-final.mjs"
+    "video:validate": "bun scripts/video/validate-final.mjs",
+    "video:diversity": "bun scripts/video/seed-diversity.mjs"
   },
   "dependencies": {
     "zod": "^3.23.8"
