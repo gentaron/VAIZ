@@ -15,6 +15,69 @@ export function rate(value) {
   return d > 0 ? n/d : NaN;
 }
 
+/**
+ * @typedef {{width:number,height:number,pixels:ArrayLike<number>}} RigidityFrame
+ */
+
+/**
+ * 連続 2 フレームのシーン剛性を局所偏差で測る。副作用・外部通信なし。
+ * 整数の平行移動だけを位置合わせで吸収し、スケール変化は吸収しない。
+ * 整列後に残ったブロック単位の平均絶対差の RMS を返す (0 = 完全剛性、小さいほど剛性が高い)。
+ * 自由なスケール合わせをしないのは、徐々に崩れるシーンを「動いただけ」と
+ * 見逃さないため。周辺 maxShift ピクセルは位置合わせ用の共通領域として比較しない。
+ *
+ * @param {RigidityFrame} prev
+ * @param {RigidityFrame} next
+ * @param {{maxShift?:number,cell?:number}} [opts]
+ * @returns {number}
+ */
+export function sceneRigidityScore(prev, next, {maxShift=4,cell=4}={}) {
+  const w=prev?.width, h=prev?.height;
+  if(!Number.isInteger(w)||!Number.isInteger(h)||!Number.isInteger(maxShift)||maxShift<0||
+     w<=2*maxShift||h<=2*maxShift||next?.width!==w||next?.height!==h) return NaN;
+  const a=prev.pixels, b=next.pixels;
+  if(!a||!b||a.length<w*h||b.length<w*h) return NaN;
+
+  const step=Math.max(1,Math.floor(Math.min(w,h)/32));
+  let best={dx:0,dy:0,cost:Number.POSITIVE_INFINITY};
+  for(let dy=-maxShift;dy<=maxShift;dy++) {
+    for(let dx=-maxShift;dx<=maxShift;dx++) {
+      let sum=0,n=0;
+      for(let y=maxShift;y<h-maxShift;y+=step) {
+        for(let x=maxShift;x<w-maxShift;x+=step) {
+          sum+=Math.abs(a[y*w+x]-b[(y+dy)*w+x+dx]);
+          n++;
+        }
+      }
+      const cost=sum/n;
+      const smaller=Math.abs(dx)+Math.abs(dy)<Math.abs(best.dx)+Math.abs(best.dy);
+      if(cost<best.cost-1e-9||(Math.abs(cost-best.cost)<=1e-9&&smaller)) best={dx,dy,cost};
+    }
+  }
+
+  const {dx,dy}=best;
+  const bw=Math.max(1,Math.floor((w-2*maxShift)/cell));
+  const bh=Math.max(1,Math.floor((h-2*maxShift)/cell));
+  let squares=0,blocks=0;
+  for(let by=0;by<cell;by++) {
+    const y0=maxShift+by*bh, y1=Math.min(h-maxShift,y0+bh);
+    for(let bx=0;bx<cell;bx++) {
+      const x0=maxShift+bx*bw, x1=Math.min(w-maxShift,x0+bw);
+      if(y0>=y1||x0>=x1) continue;
+      let sum=0,n=0;
+      for(let y=y0;y<y1;y++) {
+        for(let x=x0;x<x1;x++) {
+          sum+=Math.abs(a[y*w+x]-b[(y+dy)*w+x+dx]);
+          n++;
+        }
+      }
+      squares+=(sum/n)**2;
+      blocks++;
+    }
+  }
+  return blocks ? Math.sqrt(squares/blocks) : NaN;
+}
+
 export function checkFinalMetadata(info, bytes, {minSeconds=10,maxSeconds=240}={}) {
   const errors=[];
   if (!Number.isSafeInteger(bytes) || bytes < 1024) errors.push('media file is missing or too small');
