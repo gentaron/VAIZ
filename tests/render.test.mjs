@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   assTime,
   buildASS,
+  buildFfmpegArgs,
   buildTimeline,
   finalVideoFilter,
   charWidth,
@@ -266,5 +267,32 @@ describe('final export color range', () => {
       '[0:v]ass=subtitles.ass,scale=in_range=auto:out_range=tv,format=yuv420p[v]',
     );
     expect(finalVideoFilter('subtitles.ass')).toContain('out_range=tv');
+  });
+});
+
+describe('buildFfmpegArgs', () => {
+  test('許可されたフラグとパスだけから引数を作り、危険なパスを拒否する', () => {
+    const args = buildFfmpegArgs('scene', {
+      image: 'out/img/0.jpg',
+      output: 'out/clip_0.mp4',
+      filter: '[0:v]scale=w:h[v]',
+      frames: '30',
+    });
+    expect(args[0]).toBe('-i');
+    expect(args[1]).toBe('out/img/0.jpg');
+    expect(args[args.length - 1]).toBe('out/clip_0.mp4');
+    expect(args).toContain('-filter_complex');
+    expect(args.some((a) => a.includes('; rm ') || a.includes('$( '))).toBe(false);
+
+    for (const bad of ['out/img/0.jpg; rm -rf /', '$(curl evil)', 'out/../secret.mp4', 'out/a b.mp4']) {
+      expect(() =>
+        buildFfmpegArgs('scene', {
+          image: bad,
+          output: 'out/clip_0.mp4',
+          filter: '[0:v]scale=w:h[v]',
+          frames: '30',
+        }),
+      ).toThrow();
+    }
   });
 });
