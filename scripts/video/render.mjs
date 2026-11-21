@@ -78,6 +78,108 @@ function ffprobeJson(file) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 安全な ffmpeg 引数ビルダー
+//   LLM 出力や plan.json 由来の文字列から直接コマンドを書かせず、
+//   ここで決めたフラグとパスだけを argv として組み立てる。
+//   ff() はこの配列をそのまま execFileSync に渡す（シェルを経由しない）。
+// ═══════════════════════════════════════════════════════════════
+const FFMPEG_SAFE_NAME = /^[A-Za-z0-9._/+-]+$/;
+const FFMPEG_ALLOWED_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'wav', 'ass', 'mp4']);
+const FFMPEG_PATH_KEYS = new Set([
+  'image', 'output', 'current', 'next', 'video', 'audio',
+]);
+
+function checkFfmpegPath(file) {
+  if (typeof file !== 'string' || file.length === 0 || file.length > 512) {
+    throw new Error('Invalid ffmpeg path: empty or too long');
+  }
+  if (!FFMPEG_SAFE_NAME.test(file)) {
+    throw new Error(`Invalid ffmpeg path: unsafe character in ${file}`);
+  }
+  if (file.split('/').includes('..')) {
+    throw new Error(`Invalid ffmpeg path: parent traversal in ${file}`);
+  }
+  const base = path.basename(file);
+  const ext = base.includes('.') ? base.slice(base.lastIndexOf('.') + 1).toLowerCase() : '';
+  if (!FFMPEG_ALLOWED_EXT.has(ext)) {
+    throw new Error(`Invalid ffmpeg path: unsupported extension .${ext}`);
+  }
+  return file;
+}
+
+/**
+ * 許可したフラグと検証済みパスだけから ffmpeg の引数リストを作る。
+ * filter はこのモジュール内の生成物のみを渡す（外部入力の生文字列は受け取らない）。
+ * 生成手順は変更せず、既存の ff([...]) 呼び出しと同じ並びを返すラッパー。
+ */
+export function buildFfmpegArgs(kind, paths = {}) {
+  const checked = { ...paths };
+  for (const key of FFMPEG_PATH_KEYS) {
+    if (!(key in paths)) continue;
+    const value = paths[key];
+    checked[key] = Array.isArray(value)
+      ? value.map(checkFfmpegPath)
+      : checkFfmpegPath(value);
+  }
+
+  const videoCodec = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p'];
+
+  switch (kind) {
+    case 'scene': {
+      const { image, output, filter, frames } = checked;
+      return [
+        '-i', image,
+        '-filter_complex', filter,
+        '-map', '[v]',
+        '-frames:v', String(frames),
+        '-r', String(FPS),
+        ...videoCodec,
+        '-an',
+        output,
+      ];
+    }
+    case 'xfade': {
+      const { current, next, output, filter } = checked;
+      return [
+        '-i', current,
+        '-i', next,
+        '-filter_complex', filter,
+        '-map', '[v]',
+        ...videoCodec,
+        '-r', String(FPS),
+        '-an',
+        output,
+      ];
+    }
+    case 'final': {
+      const { video, audio, filter, output, total } = checked;
+      const inputs = audio.flatMap((p) => ['-i', p]);
+      return [
+        '-i', video,
+        ...inputs,
+        '-filter_complex', filter,
+        '-map', '[v]',
+        '-map', '[a]',
+        '-t', total,
+        '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        '-color_range', 'tv',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-ar', '48000',
+        '-r', String(FPS),
+        '-movflags', '+faststart',
+        output,
+      ];
+    }
+    default:
+      throw new Error(`Unknown ffmpeg args kind: ${kind}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // タイムライン計算
 //   clip[i] の尺       = PADDING + narration[i] + PADDING
 //   clip[i] の開始位置 = 直前までの累積 - xfade の重なり分
